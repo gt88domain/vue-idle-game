@@ -6,7 +6,7 @@
     <div class="ringPanel" :style="{'box-shadow':' 0 0 5px 5px '+((ring.quality||{}).color||'#a1a1a1')+'b8'}" v-if="JSON.stringify(ring)!='{}'">
       <div class="title">
         <div class='icon' :class="{'red-flash':ring.enchantlvl>=13,unique:ring.quality.name=='独特'}" :style="{'box-shadow':'inset 0 0 7px 2px '+((ring.quality||{}).color||'#a1a1a1')}">
-          <img :src="ring.type.iconSrc" alt="">
+          <img :src="iconOf(ring)" alt="">
         </div>
         <div class='name' :style="{color:ring.quality.color}">{{ring.type.name}} {{ring.enchantlvl?'(+'+ring.enchantlvl+')':''}}</div>
       </div>
@@ -47,6 +47,8 @@
 import { equiAttributeRing } from '@/assets/config/equiAttributeRing'
 import { matchSetPiece, getSetById } from '@/assets/config/sets'
 import { scoreEquipment } from '@/assets/js/battle'
+import { resolveIcon } from '@/assets/config/artMap'
+
 export default {
   name: "ringPanel",
   mixins: [equiAttributeRing],
@@ -65,6 +67,9 @@ export default {
     }
   },
   methods: {
+    iconOf(item) {
+      return resolveIcon((item || {}).type)
+    },
     // ==== 新增：评分与套装激活层数（给 tooltip 用） ====
     score(item) {
       return scoreEquipment(item)

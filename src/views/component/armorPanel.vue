@@ -6,7 +6,7 @@
     <div class="armorPanel" :style="{'box-shadow':' 0 0 5px 5px '+((armor.quality||{}).color||'#a1a1a1')+'b8'}" v-if="JSON.stringify(armor)!='{}'">
       <div class="title">
         <div class='icon' :class="{'red-flash':armor.enchantlvl>=13,unique:armor.quality.name=='独特'}"  :style="{'box-shadow':'inset 0 0 7px 2px '+((armor.quality||{}).color||'#a1a1a1')}">
-          <img :src="armor.type.iconSrc" alt="">
+          <img :src="iconOf(armor)" alt="">
         </div>
         <div class='name' :style="{color:armor.quality.color}">{{armor.type.name}} {{armor.enchantlvl?'(+'+armor.enchantlvl+')':''}}</div>
       </div>
@@ -47,6 +47,8 @@
 import {equiAttributeArmor} from '@/assets/config/equiAttributeArmor'
 import { matchSetPiece, getSetById } from '@/assets/config/sets'
 import { scoreEquipment } from '@/assets/js/battle'
+import { resolveIcon } from '@/assets/config/artMap'
+
 export default {
   name: "armorPanel",
   mixins:[equiAttributeArmor],
@@ -65,6 +67,9 @@ export default {
     }
   },
   methods: {
+    iconOf(item) {
+      return resolveIcon((item || {}).type)
+    },
     // ==== 新增：评分与套装激活层数（给 tooltip 用） ====
     score(item) {
       return scoreEquipment(item)

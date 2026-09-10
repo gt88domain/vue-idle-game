@@ -6,7 +6,7 @@
     <div class="neckPanel" :style="{'box-shadow':' 0 0 5px 5px '+((neck.quality||{}).color||'#a1a1a1')+'b8'}" v-if="JSON.stringify(neck)!='{}'">
       <div class="title">
         <div class='icon' :class="{'red-flash':neck.enchantlvl>=13,unique:neck.quality.name=='独特'}" :style="{'box-shadow':'inset 0 0 7px 2px '+((neck.quality||{}).color||'#a1a1a1')}">
-          <img :src="neck.type.iconSrc" alt="">
+          <img :src="iconOf(neck)" alt="">
         </div>
         <div class='name' :style="{color:neck.quality.color}">{{neck.type.name}} {{neck.enchantlvl?'(+'+neck.enchantlvl+')':''}}</div>
       </div>
@@ -47,6 +47,8 @@
 import {equiAttributeNeck} from '@/assets/config/equiAttributeNeck'
 import { matchSetPiece, getSetById } from '@/assets/config/sets'
 import { scoreEquipment } from '@/assets/js/battle'
+import { resolveIcon } from '@/assets/config/artMap'
+
 export default {
   name: "neckPanel",
   mixins:[equiAttributeNeck],
@@ -65,6 +67,9 @@ export default {
     }
   },
   methods: {
+    iconOf(item) {
+      return resolveIcon((item || {}).type)
+    },
     // ==== 新增：评分与套装激活层数（给 tooltip 用） ====
     score(item) {
       return scoreEquipment(item)

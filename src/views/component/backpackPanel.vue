@@ -16,7 +16,7 @@
       <div class="grid">
         <div class="title" v-if="v.lv" @contextmenu.prevent="openMenu(k,$event)" @touchstart.stop.prevent="openMenu(k,$event)" @mouseover="showItemInfo($event,v.itemType,v)" @mouseleave="closeItemInfo">
           <div class="icon" :class="{'red-flash':v.enchantlvl>=13}"  :style="{ 'box-shadow': 'inset 0 0 7px 2px ' + v.quality.color }">
-            <img :src="v.type.iconSrc" alt="" />
+            <img :src="iconOf(v)" alt="" />
           </div>
           <div class="title-lock" v-if="v.locked">
             <img src="../../assets/icons/lock.png" alt="">
@@ -66,6 +66,8 @@
 import { assist } from '../../assets/js/assist';
 import { scoreEquipment } from '../../assets/js/battle';
 import { SETS } from '../../assets/config/sets';
+import { resolveIcon } from '@/assets/config/artMap'
+
 export default {
   name: "backpackPanel",
   data() {
@@ -213,6 +215,9 @@ export default {
 
   },
   methods: {
+    iconOf(item) {
+      return resolveIcon((item || {}).type)
+    },
     // ==== 新增：筛选 / 评分 / 排序 ====
     matches(v) {
       if (!v || !v.lv) {

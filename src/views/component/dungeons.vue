@@ -1,12 +1,32 @@
 <template>
-  <div class="dungeons">
+  <div class="dungeons" :class="{shake: shake}">
+    <!-- 新增：出战队伍 + 大招充能 -->
+    <div class="squad" v-if="partyHeroes.length">
+      <div class="squad-slot" v-for="(h, i) in partyHeroes" :key="h.id"
+           :class="{ulting: ultFlash == h.id}" :style="{'--qc': h.color}">
+        <img :src="h.portrait" alt="">
+        <span>{{h.short}}</span>
+      </div>
+      <div class="ult-charge" :title="'大招充能：每场胜利 +1，满 ' + ultCost + ' 点自动释放'">
+        <div class="pips">
+          <i v-for="n in ultCost" :key="n" :class="{on: n <= ultCharge}"></i>
+        </div>
+        <span>{{ultCharge}}/{{ultCost}} · {{ultName}}</span>
+      </div>
+    </div>
+
+    <!-- 新增：战斗飘字层（纯表现层，不参与任何结算） -->
+    <div class="fx-layer">
+      <div v-for="f in fx" :key="f.id" class="fx-num" :class="'fx-' + f.kind" :style="{left: f.left + '%', top: f.top + '%'}">{{f.text}}</div>
+    </div>
+
     <div class="progress-bar"></div>
     <div class="icon-bar">
-      <div class="player" :style="{left:left+'%','backgroundPosition':parseInt(left%4)*32+'px 96px'}">
+      <div class="player" :class="{hit: hitFlash == 'player'}" :style="{left:left+'%','backgroundPosition':parseInt(left%4)*32+'px 96px'}">
         <!-- <img src="../../assets/icons/map/player-s.png" alt=""> -->
         <!-- :style="{background-position:}" -->
       </div>
-      <div class="monster" v-for="(v,k) in dungeons.eventType" :key="k" :style="{left:(100/dungeons.eventNum)*(k+1)+'%'}">
+      <div class="monster" :class="{hit: hitFlash == 'm' + k}" v-for="(v,k) in dungeons.eventType" :key="k" :style="{left:(100/dungeons.eventNum)*(k+1)+'%'}">
         <img :src="'./icons/map/'+v.type+'.png'" alt="">
       </div>
     </div>
@@ -15,6 +35,9 @@
 <script>
 import { assist } from '../../assets/js/assist';
 import { rollSetPiece } from '../../assets/config/sets';
+import { HERO_MAP, FACTIONS } from '../../assets/config/heroes'
+import { HERO_PORTRAITS } from '../../assets/config/artMap'
+import sfx from '../../assets/js/sfx'
 export default {
   name: "dungeons",
   mixins: [assist],
@@ -26,6 +49,11 @@ export default {
       battleComTime: {},
       nextEvent: 1,
       battleTime:2000,
+      fx: [],
+      fxSeq: 0,
+      hitFlash: '',
+      ultFlash: '',
+      shake: false,
       moveTime:50,
       dungeons: {
         battleTime: 2000,
@@ -106,8 +134,36 @@ export default {
     reincarnationAttribute() { return this.$store.state.reincarnationAttribute },
     // 新增：祭坛「疾行符文」带来的推进/战斗加速（最多 -60%）
     speedK() {
+      // 祭坛「疾行符文」+ 玩家手动倍速（倍速只影响真实时间，不影响任何结算）
       var sp = Number(this.$store.state.bonus.SPEED || 0)
-      return Math.max(0.4, 1 - sp / 100)
+      var manual = Number(this.$store.state.settings.speed || 1)
+      return Math.max(0.1, Math.max(0.4, 1 - sp / 100) / Math.max(1, manual))
+    },
+    ultCharge() {
+      return Number(this.$store.state.ultCharge || 0)
+    },
+    ultCost() {
+      return Math.max(2, Number((this.$store.state.heroBonus.ult || {}).cost || 4))
+    },
+    ultName() {
+      var h = this.partyHeroes[0]
+      return h ? h.ultName : ''
+    },
+    partyHeroes() {
+      var heroes = this.$store.state.heroes || {}
+      return (heroes.party || []).map(id => {
+        var cfg = HERO_MAP[id]
+        if (!cfg) {
+          return null
+        }
+        return {
+          id: id,
+          short: cfg.name.split(' ')[0],
+          portrait: HERO_PORTRAITS[id],
+          color: (FACTIONS[cfg.faction] || {}).color,
+          ultName: cfg.ult.name
+        }
+      }).filter(v => !!v)
     },
     goldMul() {
       // 新增：金币获取加成（套装「贪婪之旅」/祭坛「贪婪回响」/称号）
@@ -289,6 +345,37 @@ export default {
       }, 100)
     },
     // 计算战斗过程
+    spawnFx(kind, text, left, top) {
+      var id = ++this.fxSeq
+      this.fx.push({
+        id: id,
+        kind: kind,
+        text: text,
+        left: (left === undefined ? 50 : left),
+        top: (top === undefined ? 34 : top)
+      })
+      setTimeout(() => {
+        var i = this.fx.findIndex(v => v.id === id)
+        if (i >= 0) {
+          this.fx.splice(i, 1)
+        }
+      }, 950)
+      if (this.fx.length > 14) {
+        this.fx.splice(0, this.fx.length - 14)
+      }
+    },
+    flash(target) {
+      this.hitFlash = target
+      setTimeout(() => {
+        this.hitFlash = ''
+      }, 150)
+    },
+    doShake() {
+      this.shake = true
+      setTimeout(() => {
+        this.shake = false
+      }, 280)
+    },
     battleCom(event) {
       let playerAttribute = this.$store.state.playerAttribute.attribute,
         battleTime,
@@ -304,6 +391,40 @@ export default {
       var penetrateK = 1 + Number(playerAttribute.PENETRATE || 0) / 100
       var realPlayerDps = playerDPS * penetrateK + thornsDps
 
+      // ==== 新增：英雄大招（充能满时自动释放；未编队英雄时整段不参与计算）====
+      var hb = this.$store.state.heroBonus || {}
+      var ult = hb.ult || {}
+      var ultPower = (ult.burst || 0) + (ult.shield || 0) + (ult.rage || 0) + (ult.execute || 0)
+      var ultReady = this.partyHeroes.length > 0 && this.ultCharge >= this.ultCost && ultPower > 0
+      var ultLabel = ''
+      if (ultReady) {
+        if (ult.burst) {
+          var burstDmg = Math.floor(realPlayerDps * ult.burst / 100)
+          monsterAttribute.HP = Math.max(0, monsterAttribute.HP - burstDmg)
+          ultLabel += ' 爆发' + burstDmg
+        }
+        if (ult.execute) {
+          var burn = Math.floor(monsterAttribute.HP * ult.execute / 100)
+          monsterAttribute.HP = Math.max(0, monsterAttribute.HP - burn)
+          ultLabel += ' 处决-' + burn
+        }
+        if (ult.rage) {
+          realPlayerDps = realPlayerDps * (1 + ult.rage / 100)
+        }
+        var dr = Math.min(85, (ult.shield || 0) + (hb.shield || 0))
+        if (dr > 0) {
+          reducedDamage = reducedDamage * (1 - dr / 100)
+        }
+        this.$store.commit('set_ult_charge', 0)
+        this.ultFlash = this.partyHeroes[0].id
+        setTimeout(() => {
+          this.ultFlash = ''
+        }, 700)
+        this.spawnFx('ult', (ultLabel ? '大招！' + ultLabel : '大招！'), 50, 16)
+        this.doShake()
+        sfx.play('ult')
+      }
+
       var playerDeadTime = (playerAttribute.CURHP.value+playerBLOC) / reducedDamage / monsterAttribute.ATK,
         monsterDeadTime = (monsterAttribute.HP / realPlayerDps)
 
@@ -315,6 +436,28 @@ export default {
         takeDmg = takeDmg + playerBLOC
         takeDmg = takeDmg>-1?-1:takeDmg
         this.$store.commit('set_player_curhp', takeDmg)
+
+        // ==== 新增：战斗表现（飘字 / 受击闪白 / 充能）====
+        var mLeft = (100 / this.dungeons.eventNum) * this.nextEvent
+        this.spawnFx('dmg', '-' + Math.floor(monsterAttribute.HP), mLeft, 30)
+        this.spawnFx('taken', '-' + Math.abs(takeDmg), this.left, 62)
+        this.flash('m' + (this.nextEvent - 1))
+        this.flash('player')
+        if (Number(playerAttribute.CRIT.value) >= 45) {
+          this.spawnFx('crit', '暴击 ' + Math.floor(playerAttribute.CRIT.value) + '%', mLeft, 20)
+          this.doShake()
+        }
+        if (this.partyHeroes.length) {
+          this.$store.commit('set_ult_charge', Math.min(this.ultCost * 2, this.ultCharge + 1 + (hb.charge || 0)))
+        }
+        if (hb.killHeal > 0) {
+          var kh = Math.floor(playerAttribute.MAXHP.value * hb.killHeal / 100)
+          if (kh > 0) {
+            this.$store.commit('set_player_curhp', kh)
+            this.spawnFx('heal', '+' + kh, this.left, 70)
+          }
+        }
+        sfx.play(event.type == 'boss' ? 'crit' : 'hit')
 
         // 新增：击杀统计（成就系统）
         this.$store.commit('report', {
@@ -389,6 +532,9 @@ export default {
             type: 'warning'
           });
         }
+        this.spawnFx('taken', '战败…', this.left, 58)
+        this.doShake()
+        sfx.play('defeat')
         this.$store.commit('set_player_curhp', 'dead')
         clearInterval(this.pro)
         clearTimeout(this.timeOut)
@@ -606,6 +752,100 @@ export default {
   width: 100%;
   height: 100%;
   position: relative;
+
+  /* 新增：战斗舞台底图（英雄 vs 怪物不再飘在黑底上） */
+  &::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: url('../../assets/art/arena.jpg') no-repeat center 40%;
+    background-size: cover;
+    opacity: 0.28;
+    pointer-events: none;
+  }
+
+  .squad {
+    position: absolute;
+    top: 0.06rem;
+    left: 0.1rem;
+    display: flex;
+    align-items: flex-end;
+    z-index: 3;
+
+    .squad-slot {
+      position: relative;
+      width: 0.44rem;
+      margin-right: 0.05rem;
+      text-align: center;
+
+      img {
+        width: 0.44rem;
+        height: 0.44rem;
+        object-fit: cover;
+        object-position: 50% 16%;
+        border: 1px solid rgba(255, 255, 255, 0.22);
+        border-radius: 2px;
+        background: #000;
+        filter: saturate(1.05);
+        transition: transform 0.15s ease;
+      }
+
+      span {
+        display: block;
+        font-size: 0.1rem;
+        color: #cbbfa8;
+        text-shadow: 0 1px 2px #000;
+      }
+    }
+
+    .squad-slot.ulting img {
+      transform: translateY(-0.03rem) scale(1.08);
+      border-color: var(--qc);
+      box-shadow: 0 0 0.1rem var(--qc);
+    }
+
+    .ult-charge {
+      margin-left: 0.04rem;
+      padding-bottom: 0.02rem;
+
+      .pips {
+        display: flex;
+
+        i {
+          display: block;
+          width: 0.07rem;
+          height: 0.07rem;
+          margin-right: 0.02rem;
+          border: 1px solid #6b6055;
+          background: #14120f;
+          border-radius: 1px;
+        }
+
+        i.on {
+          background: linear-gradient(180deg, #ffe9b8, #d9a13c);
+          border-color: #ffd76a;
+          box-shadow: 0 0 0.04rem rgba(255, 200, 90, 0.8);
+        }
+      }
+
+      span {
+        font-size: 0.1rem;
+        color: #a89e90;
+        text-shadow: 0 1px 2px #000;
+      }
+    }
+  }
+
+  .fx-layer {
+    z-index: 4;
+  }
+
+  .icon-bar .hit {
+    animation: fxHit 0.16s ease-out;
+  }
   .progress-bar {
     position: absolute;
     bottom: 5px;

@@ -215,6 +215,60 @@ const handle = (() => {
   return o.exports
 })()
 
+// 新增玩法模块用「真实实现」而不是桩函数：这样才能证明新系统在零值时与原版逐位一致
+const realCfg = (() => {
+  const load = f => {
+    try {
+      return require(path.join(ROOT, f))
+    } catch (e) {
+      return null
+    }
+  }
+  return {
+    sets: load('src/assets/config/sets.js'),
+    abyss: load('src/assets/config/abyss.js'),
+    ach: load('src/assets/config/achievements.js'),
+    heroes: load('src/assets/config/heroes.js')
+  }
+})()
+
+const ZERO_HERO = {
+  ATK: 0, HP: 0, DEF: 0, BLOC: 0, entries: {},
+  ult: { burst: 0, shield: 0, rage: 0, heal: 0, execute: 0, cost: 4 },
+  charge: 0, shield: 0, killHeal: 0, factions: {}
+}
+
+// 与 store.js 同名实现保持一致（内联，避免依赖打包器）
+function mergeBonusImpl(target, src) {
+  if (!src) {
+    return target
+  }
+  Object.keys(src).forEach(k => {
+    if (!isNaN(Number(src[k]))) {
+      target[k] = (target[k] || 0) + Number(src[k])
+    }
+  })
+  return target
+}
+
+// store.js 里是 partyBonusOf(state.heroes)，因此这里接收的就是 heroes 本身
+function partyBonusOfImpl(heroes) {
+  const h = heroes || {}
+  if (!realCfg.heroes || !(h.party || []).length) {
+    return JSON.parse(JSON.stringify(ZERO_HERO))
+  }
+  return realCfg.heroes.partyBonus(h.party, h.owned || {})
+}
+
+function pickAttr(st) {
+  const a = st.playerAttribute.attribute
+  return {
+    MAXHP: a.MAXHP.value, CURHP: a.CURHP.value, ATK: a.ATK.value, DEF: a.DEF.value,
+    CRIT: a.CRIT.value, CRITDMG: a.CRITDMG.value, BLOC: a.BLOC.value, DPS: a.DPS,
+    REDUCDMG: a.REDUCDMG, EVA: a.EVA.value
+  }
+}
+
 function buildState(items) {
   const initialAttr = {
     CURHP: { value: 0, showValue: '' },
@@ -239,13 +293,14 @@ function buildState(items) {
     bonus: {},
     setDetail: [],
     title: '',
-    abyss: { echoes: 0, perks: {} }
+    abyss: { echoes: 0, perks: {} },
+    heroes: { owned: {}, party: [], tickets: 0, pity5: 0, pity4: 0, total: 0, dupes: 0 }
   }
 }
 
-function runMutation(code, items, extraInject) {
+function runMutation(code, items, extraInject, statePatch) {
   const body = extractMutation(code, 'set_player_attribute')
-  const state = buildState(items)
+  const state = Object.assign(buildState(items), statePatch || {})
   const vueInstance = {
     $deepCopy: d => JSON.parse(JSON.stringify(d)),
     $store: { commit: () => {} }
@@ -253,11 +308,12 @@ function runMutation(code, items, extraInject) {
   const inject = Object.assign({
     handle,
     vueInstance,
-    aggregateSetBonus: () => ({ bonus: {}, detail: [], count: {} }),
-    TITLES: {},
-    ABYSS_PERKS: [],
-    aggregatePerks: () => ({}),
-    mergeBonus: () => {}
+    aggregateSetBonus: realCfg.sets ? realCfg.sets.aggregateSetBonus : () => ({ bonus: {}, detail: [], count: {} }),
+    TITLES: realCfg.ach ? realCfg.ach.TITLES : {},
+    ABYSS_PERKS: realCfg.abyss ? realCfg.abyss.ABYSS_PERKS : [],
+    aggregatePerks: realCfg.abyss ? realCfg.abyss.aggregatePerks : () => ({}),
+    mergeBonus: mergeBonusImpl,
+    partyBonusOf: partyBonusOfImpl
   }, extraInject || {})
   const keys = Object.keys(inject)
   const fn = new Function('state', 'data', keys.map(k => `var ${k} = __inj[${JSON.stringify(k)}];`).join('\n') +
@@ -286,14 +342,7 @@ for (let t = 0; t < 60; t++) {
   })
   const A = runMutation(ref(UPSTREAM, 'src/store.js'), items.map(i => JSON.parse(JSON.stringify(i))))
   const B = runMutation(cur('src/store.js'), items.map(i => JSON.parse(JSON.stringify(i))))
-  const pick = st => {
-    const a = st.playerAttribute.attribute
-    return {
-      MAXHP: a.MAXHP.value, CURHP: a.CURHP.value, ATK: a.ATK.value, DEF: a.DEF.value,
-      CRIT: a.CRIT.value, CRITDMG: a.CRITDMG.value, BLOC: a.BLOC.value, DPS: a.DPS,
-      REDUCDMG: a.REDUCDMG, EVA: a.EVA.value
-    }
-  }
+  const pick = pickAttr
   const pa = JSON.stringify(pick(A)), pb = JSON.stringify(pick(B))
   attrRuns++
   if (pa !== pb) {
@@ -373,6 +422,41 @@ console.log('\n[4] 战斗解算（新增属性为 0 时应等价于原版竞速�
   check(`battle.js 在无新增属性时与原版解算等价（${n} 组随机战斗）`, bad === 0, bad ? `${bad} 处不同` : '0 差异')
 }
 
+// --------------------------------------------- 5) 新增玩法：零值恒等 + 真实增益
+console.log('\n[5] 新增玩法（英雄 / 套装 / 祭坛）与原版属性的关系')
+{
+  const panels = {}
+  SLOTS.forEach(x => {
+    panels[x] = makePanel(ref(UPSTREAM, PANEL[x]), evalConfig(ref(UPSTREAM, CFG[x])), STUBS)
+  })
+  Math.random = rng(9100)
+  const items = SLOTS.map(x => {
+    const q = Math.floor(Math.random() * 4)
+    const lv = 1 + Math.floor(Math.random() * 120)
+    return JSON.parse(panels[x].createNewItem(q, lv))
+  })
+  const up = runMutation(ref(UPSTREAM, 'src/store.js'), items.map(i => JSON.parse(JSON.stringify(i))))
+  const zero = runMutation(cur('src/store.js'), items.map(i => JSON.parse(JSON.stringify(i))))
+  const sameJSON = JSON.stringify(pickAttr(up)) === JSON.stringify(pickAttr(zero))
+  check('空英雄/空套装/空祭坛时属性结果与原版逐位一致', sameJSON, sameJSON ? '' : JSON.stringify(pickAttr(up)) + ' != ' + JSON.stringify(pickAttr(zero)))
+
+  let gainOk = false, detail = '缺少 src/assets/config/heroes.js'
+  if (realCfg.heroes) {
+    const owned = {}
+    const party = realCfg.heroes.HEROES.slice(0, 3).map(h => {
+      owned[h.id] = { id: h.id, lv: 80, star: 5, shards: 0, skill: 3 }
+      return h.id
+    })
+    const withHero = runMutation(cur('src/store.js'), items.map(i => JSON.parse(JSON.stringify(i))), null, {
+      heroes: { owned, party, tickets: 0, pity5: 0, pity4: 0, total: 3, dupes: 0 }
+    })
+    const a = pickAttr(zero), b = pickAttr(withHero)
+    gainOk = b.ATK > a.ATK && b.MAXHP > a.MAXHP && b.DEF >= a.DEF && b.DPS > a.DPS
+    detail = `ATK ${a.ATK}→${b.ATK}，MAXHP ${a.MAXHP}→${b.MAXHP}，DPS ${Math.round(a.DPS)}→${Math.round(b.DPS)}`
+  }
+  check('上阵 3 名英雄后面板确实提升（证明接进了属性管线）', gainOk, detail)
+}
+
 // ---------------------------------------------------------------- 汇总
 const failed = results.filter(r => !r.pass)
 console.log(`\n==== ${results.length - failed.length}/${results.length} 通过 ====`)
@@ -380,4 +464,4 @@ if (failed.length) {
   console.log('失败项：\n' + failed.map(f => ' - ' + f.name).join('\n'))
   process.exit(1)
 }
-console.log('结论：新增玩法没有改变原版的装备、属性、战斗与随机管线。')
+console.log('结论：新增玩法没有改变原版的装备、属性、战斗与随机管线（新系统在不用时恒等，用时确有增益）。')

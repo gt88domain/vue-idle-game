@@ -108,6 +108,24 @@ export const TITLES = {
       REGEN: 60
     }
   },
+  muster: {
+    id: 'muster',
+    name: '点将台',
+    des: '一个人走得快，一支队伍走得远。',
+    mods: {
+      ATKPERCENT: 4,
+      REGEN: 4
+    }
+  },
+  vanguard: {
+    id: 'vanguard',
+    name: '三英战戟',
+    des: '三人同阵，气势压人。',
+    mods: {
+      ATKPERCENT: 6,
+      LUCK: 5
+    }
+  },
   grandmaster: {
     id: 'grandmaster',
     name: '一代宗师',
@@ -260,6 +278,42 @@ export const ACHIEVEMENTS = [{
     goal: 4,
     metric: s => Math.max(0, ...s.setDetail.map(v => v.num)),
     title: 'grandmaster'
+  },
+  {
+    id: 'recruit',
+    name: '英雄集结',
+    des: '图鉴中收录 3 位英雄',
+    icon: './icons/menu/icon_85.png',
+    goal: 3,
+    metric: s => Object.keys(s.heroes.owned || {}).length,
+    title: 'muster'
+  },
+  {
+    id: 'banner',
+    name: '十连祈愿',
+    des: '累计召唤 20 次',
+    icon: './icons/menu/quest_icon_02.png',
+    goal: 20,
+    metric: s => s.stats.summons,
+    title: null
+  },
+  {
+    id: 'vanguard',
+    name: '三英战戟',
+    des: '同时上阵 3 位英雄',
+    icon: './icons/menu/d3.png',
+    goal: 3,
+    metric: s => (s.heroes.party || []).length,
+    title: 'vanguard'
+  },
+  {
+    id: 'starcaller',
+    name: '唤星者',
+    des: '任意英雄升到 4 星',
+    icon: './icons/menu/quest_icon_03.png',
+    goal: 4,
+    metric: s => Math.max(0, ...Object.keys(s.heroes.owned || {}).map(k => s.heroes.owned[k].star || 0)),
+    title: null
   },
   {
     id: 'survivor',

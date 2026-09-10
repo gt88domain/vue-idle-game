@@ -87,6 +87,8 @@
 import { assist } from '../../assets/js/assist';
 import cTooltip from '../uiComponent/tooltip'
 import handle from '../../assets/js/handle'
+import { resolveIcon } from '@/assets/config/artMap'
+
 export default {
   components: { cTooltip },
   name: "equimentPanel",
@@ -139,7 +141,7 @@ export default {
   computed: {
     // 新增：防御式读取，避免面板在没有装备时渲染报错
     equimentColor() { return (this.equiment.quality || {}).color || '#a1a1a1' },
-    equimentIcon() { return (this.equiment.type || {}).iconSrc || '' },
+    equimentIcon() { return resolveIcon(this.equiment.type) || '' },
     equimentName() { return (this.equiment.type || {}).name || '' },
 
     userGold() { return this.$store.state.playerAttribute.GOLD },

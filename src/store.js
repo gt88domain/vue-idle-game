@@ -14,6 +14,10 @@ import {
   TITLES,
   ACHIEVEMENT_ECHO
 } from './assets/config/achievements'
+import {
+  partyBonusOf,
+  normalizeHeroes
+} from './assets/js/heroes'
 Vue.use(Vuex)
 
 /** 加成池：装备百分比、套装、称号、深渊祭坛都汇入这里 */
@@ -32,6 +36,17 @@ function mergeBonus(target, src) {
     }
   })
   return target
+}
+
+/** 英雄系统初始状态（收集 / 编队 / 保底计数） */
+export const initial_heroes = {
+  owned: {},
+  party: [],
+  total: 0,
+  pity5: 0,
+  pity4: 0,
+  tickets: 0,
+  dupes: 0
 }
 
 export const initial_abyss = {
@@ -58,6 +73,10 @@ export const initial_stats = {
   setDrops: 0,
   offlineCount: 0,
   abyssFloors: 0,
+  summons: 0,
+  heroLevels: 0,
+  starUps: 0,
+  ults: 0,
   playTime: 0
 }
 
@@ -185,6 +204,9 @@ export default new Vuex.Store({
     title: '', //当前佩戴的称号 id
     unlockedAchievements: {}, //已解锁成就
     abyss: JSON.parse(JSON.stringify(initial_abyss)), //深渊回廊
+    heroes: JSON.parse(JSON.stringify(initial_heroes)), //英雄系统
+    heroBonus: partyBonusOf(initial_heroes), //队伍折算后的聚合加成（UI/战斗读取）
+    ultCharge: 0, //大招充能（每场胜利 +1）
     stats: JSON.parse(JSON.stringify(initial_stats)), //统计数据
     settings: {
       autoFarm: false, //自动征战（挂机刷本）
@@ -288,6 +310,13 @@ export default new Vuex.Store({
     set_player_rein(state, data) {
       this.state.reincarnation = data
     },
+    set_heroes(state, data) {
+      state.heroes = normalizeHeroes(data)
+      vueInstance.$store.commit('set_player_attribute')
+    },
+    set_ult_charge(state, data) {
+      state.ultCharge = Math.max(0, parseInt(data) || 0)
+    },
     set_player_attribute(state, data) {
       var p = state.playerAttribute
       // ==== 新增：聚合套装 / 称号 / 深渊祭坛加成（全部为 0 时与原版完全一致）====
@@ -297,6 +326,10 @@ export default new Vuex.Store({
       mergeBonus(bonus, setAgg.bonus)
       mergeBonus(bonus, TITLES[state.title] ? TITLES[state.title].mods : null)
       mergeBonus(bonus, aggregatePerks(state.abyss.perks))
+      // ==== 新增：英雄队伍（基础属性走词条池、大招/共鸣交给战斗解算）====
+      const hb = partyBonusOf(state.heroes)
+      mergeBonus(bonus, hb.entries)
+      state.heroBonus = hb
       state.bonus = bonus
       state.setDetail = setAgg.detail
       var warpon = p.weapon,
@@ -394,6 +427,16 @@ export default new Vuex.Store({
             break;
         }
       })
+      // ==== 新增：英雄基础属性（与装备基础值同一入口，无英雄时为 0）====
+      if (hb.ATK) {
+        attribute.ATK.value += hb.ATK
+      }
+      if (hb.HP) {
+        attribute.MAXHP.value += hb.HP
+      }
+      if (hb.DEF) {
+        attribute.DEF.value += hb.DEF
+      }
       var ATKPERCENT = 0,
         DEFPERCENT = 0,
         HPPERCENT = 0,
@@ -593,7 +636,8 @@ export default new Vuex.Store({
         playerAttribute: state.playerAttribute,
         reincarnation: state.reincarnation,
         abyss: state.abyss,
-        setDetail: state.setDetail
+        setDetail: state.setDetail,
+        heroes: state.heroes
       }
       const newly = []
       ACHIEVEMENTS.forEach(item => {

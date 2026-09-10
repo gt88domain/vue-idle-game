@@ -1,5 +1,6 @@
 <template>
   <div class="main" @contextmenu.prevent="contextmenu($event)">
+    <TitleScreen v-if="showTitle" @enter="onTitleEnter"></TitleScreen>
     <div class="user-status">
 
       <cTooltip placement="bottom">
@@ -170,33 +171,33 @@
       </div>
 
       <div class="weapon" @mouseover="showItemInfo($event,'weapon',playerWeapon,false)" @mouseleave="closeItemInfo">
-        <div class="title" v-if="playerWeapon">
+        <div class="title q-frame" :class="'q-'+(playerWeapon.quality||{}).name" v-if="playerWeapon">
           <div class='icon' :class="{'red-flash':playerWeapon.enchantlvl>=13,unique:playerWeapon.quality.name=='独特'}" :style="{'box-shadow':'inset 0 0 7px 2px '+playerWeapon.quality.color}">
-            <img :src="playerWeapon.type.iconSrc" alt="">
+            <img :src="iconOf(playerWeapon)" alt="">
           </div>
           <div class='name' :style="{color:playerWeapon.quality.color}">{{playerWeapon.type.name}} {{playerWeapon.enchantlvl?'(+'+playerWeapon.enchantlvl+')':''}}</div>
         </div>
       </div>
       <div class="armor" @mouseover="showItemInfo($event,'armor',playerArmor,false)" @mouseleave="closeItemInfo">
-        <div class="title" v-if="playerArmor">
+        <div class="title q-frame" :class="'q-'+(playerArmor.quality||{}).name" v-if="playerArmor">
           <div class='icon' :class="{'red-flash':playerArmor.enchantlvl>=13,unique:playerArmor.quality.name=='独特'}" :style="{'box-shadow':'inset 0 0 7px 2px  '+playerArmor.quality.color}">
-            <img :src="playerArmor.type.iconSrc" alt="">
+            <img :src="iconOf(playerArmor)" alt="">
           </div>
           <div class='name' :style="{color:playerArmor.quality.color}">{{playerArmor.type.name}} {{playerArmor.enchantlvl?'(+'+playerArmor.enchantlvl+')':''}}</div>
         </div>
       </div>
       <div class="neck" @mouseover="showItemInfo($event,'neck',playerNeck,false)" @mouseleave="closeItemInfo">
-        <div class="title" v-if="playerNeck">
+        <div class="title q-frame" :class="'q-'+(playerNeck.quality||{}).name" v-if="playerNeck">
           <div class='icon' :class="{'red-flash':playerNeck.enchantlvl>=13,unique:playerNeck.quality.name=='独特'}" :style="{'box-shadow':'inset 0 0 7px 2px '+playerNeck.quality.color}">
-            <img :src="playerNeck.type.iconSrc" alt="">
+            <img :src="iconOf(playerNeck)" alt="">
           </div>
           <div class='name' :style="{color:playerNeck.quality.color}">{{playerNeck.type.name}} {{playerNeck.enchantlvl?'(+'+playerNeck.enchantlvl+')':''}}</div>
         </div>
       </div>
       <div class="ring" @mouseover="showItemInfo($event,'ring',playerRing,false)" @mouseleave="closeItemInfo">
-        <div class="title" v-if="playerRing">
+        <div class="title q-frame" :class="'q-'+(playerRing.quality||{}).name" v-if="playerRing">
           <div class='icon' :class="{'red-flash':playerRing.enchantlvl>=13,unique:playerRing.quality.name=='独特'}" :style="{'box-shadow':'inset 0 0 7px 2px '+playerRing.quality.color}">
-            <img :src="playerRing.type.iconSrc" alt="">
+            <img :src="iconOf(playerRing)" alt="">
           </div>
           <div class='name' :style="{color:playerRing.quality.color}">{{playerRing.type.name}} {{playerRing.enchantlvl?'(+'+playerRing.enchantlvl+')':''}}</div>
         </div>
@@ -204,6 +205,10 @@
     </div>
     <div class="sys-info">
       <div class="clear" @click="clearSysInfo">清除信息</div>
+      <div class="speed-ctl on-art" title="推进/战斗速度：只改变动画节奏，不改变任何结算结果">
+        <i>速度</i>
+        <b v-for="sp in [1,2,4]" :key="sp" :class="{on: speed==sp}" @click="setSpeed(sp)">{{sp}}x</b>
+      </div>
       <div id='sysInfo'>
         <div class="info warning" :class="{warning:v.type=='warning',battle:v.type=='battle',win:v.type=='win',trophy:v.type=='trophy',}" v-for="(v,k) in sysInfo" :key="k">系统<i style="font-size:.12rem" v-if="v.time">({{v.time}})</i>：
           <span>{{v.msg}}</span>
@@ -469,6 +474,16 @@
     </div>
     <abyssPanel ref="abyss"></abyssPanel>
     <achievementsPanel ref="achv"></achievementsPanel>
+    <heroPanel ref="hero"></heroPanel>
+
+    <!-- 新增：手游式底部页签，一级功能常驻 -->
+    <div class="tabbar" :class="{hide: showTitle}">
+      <div v-for="t in tabs" :key="t.key" class="tabbar-item btn-press" :class="{on: activeTab==t.key}" @click="openTab(t.key)">
+        <img :src="t.icon" alt="">
+        <span>{{t.name}}</span>
+        <i class="dot" v-if="t.badge">{{t.badge}}</i>
+      </div>
+    </div>
     <extras></extras>
     <qa></qa>
     <setting></setting>
@@ -496,6 +511,10 @@ import handle from '../assets/js/handle'
 import { calcOfflineGain } from '../assets/js/offline'
 import { TITLES } from '../assets/config/achievements'
 import { SETS, getSetByName } from '../assets/config/sets'
+import TitleScreen from './titleScreen'
+import heroPanel from './component/heroPanel'
+import sfx, { sfxForSysInfo } from '../assets/js/sfx'
+import { resolveIcon } from '../assets/config/artMap'
 export default {
   name: "index",
   mixins: [assist],
@@ -536,12 +555,14 @@ export default {
       GMOpened: false,
       needComparison: true,
       offlineGain: null,
+      showTitle: true,
+      activeTab: '',
       saveData: {},
       saveDateString: '',
       debounceTime: {},  //防抖计时器
     };
   },
-  components: { weaponPanel, armorPanel, ringPanel, neckPanel, dungeons, backpackPanel, shopPanel, cTooltip, strengthenEquipment, extras, qa, setting, reinPanel, abyssPanel, achievementsPanel },
+  components: { weaponPanel, armorPanel, ringPanel, neckPanel, dungeons, backpackPanel, shopPanel, cTooltip, strengthenEquipment, extras, qa, setting, reinPanel, abyssPanel, achievementsPanel, TitleScreen, heroPanel },
   created() {
     this._sessionStart = Date.now()
     // 窗口自适应
@@ -625,6 +646,27 @@ export default {
         })
       }
     },
+    speed() {
+      return Number(this.$store.state.settings.speed || 1)
+    },
+    heroes() {
+      return this.$store.state.heroes || {}
+    },
+    tabs() {
+      return [{
+        key: 'backpack', name: '背包', icon: './icons/menu/quest_icon_02.png', badge: ''
+      }, {
+        key: 'shop', name: '商店', icon: './icons/menu/quest_icon_03.png', badge: ''
+      }, {
+        key: 'hero', name: '英雄', icon: './icons/menu/icon_85.png', badge: this.heroes.tickets ? String(this.heroes.tickets) : ''
+      }, {
+        key: 'abyss', name: '深渊', icon: './icons/menu/d3.png', badge: this.abyss.bestFloor ? String(this.abyss.bestFloor) : ''
+      }, {
+        key: 'achv', name: '成就', icon: './icons/menu/clear.png', badge: ''
+      }, {
+        key: 'rein', name: '转生', icon: './icons/menu/quest_icon_00.png', badge: this.$store.state.reincarnation.point > 0 ? '+' : ''
+      }]
+    },
     totalTitleBonus() {
       var b = this.$store.state.bonus
       var keys = Object.keys(b)
@@ -633,7 +675,8 @@ export default {
     }
   },
   watch: {
-    sysInfo() {
+    sysInfo(list) {
+      sfxForSysInfo(list && list.length ? list[list.length - 1] : null)
       var element = document.getElementById('sysInfo')
       //渲染完成后滚至最下端
       this.$nextTick(() => {
@@ -656,6 +699,39 @@ export default {
     }
   },
   methods: {
+    iconOf(eq) {
+      return resolveIcon((eq || {}).type)
+    },
+    onTitleEnter(payload) {
+      if (payload && payload.fresh) {
+        localStorage.removeItem('_sd')
+        location.reload()
+        return
+      }
+      this.showTitle = false
+      sfx.play('victory')
+      this.$store.commit('set_sys_info', {
+        msg: `欢迎回来，勇士。底部页签可以打开 背包 / 商店 / 英雄 / 深渊 / 成就。`,
+        type: ''
+      })
+    },
+    setSpeed(v) {
+      this.$store.commit('set_settings', { speed: v })
+      sfx.play('click')
+    },
+    openTab(key) {
+      this.activeTab = this.activeTab === key ? '' : key
+      sfx.play('tab')
+      if (key === 'hero') {
+        this.$refs.hero.open()
+      } else if (key === 'abyss') {
+        this.openAbyss()
+      } else if (key === 'achv') {
+        this.openAchv()
+      } else {
+        this.openMenuPanel(key)
+      }
+    },
     navToGithub() {
       window.open('https://github.com/Couy69/vue-idle-game', '_blank');
     },
@@ -807,6 +883,8 @@ export default {
           bestFloor: st.abyss.bestFloor,
           perks: Object.assign({}, st.abyss.perks)
         },
+        heroes: JSON.parse(JSON.stringify(st.heroes || {})),
+        ultCharge: st.ultCharge || 0,
         t: Date.now()
       }
     },
@@ -964,6 +1042,10 @@ export default {
                 run: null
               })
             }
+            if (ex.heroes) {
+              this.$store.commit('set_heroes', ex.heroes)
+            }
+            this.$store.commit('set_ult_charge', ex.ultCharge || 0)
             this.$store.commit('set_title', ex.title || '')
             if (ex.unlockedAchievements) {
               this.$store.replaceState(Object.assign({}, this.$store.state, {
@@ -1496,7 +1578,7 @@ a {
   .sys-info {
     position: absolute;
     border: 2px solid #ccc;
-    height: calc(100% - 4.4rem);
+    height: calc(100% - 4.9rem);
     width: 8.1rem;
     bottom: 0.1rem;
     left: 0.1rem;
@@ -1548,11 +1630,13 @@ a {
     right: 0.1rem;
     left: 8.3rem;
     top: 0.1rem;
-    bottom: 0.1rem;
+    bottom: 0.62rem;
     border: 2px solid #ccc;
-    background-image: url(../assets/img/map.jpg);
+    /* 新增：地图换成生成的场景图，加一层压暗渐变保证图标与文字可读 */
+    background-image: linear-gradient(180deg, rgba(6, 6, 8, 0.3), rgba(4, 4, 6, 0.6)), url(../assets/art/map.jpg);
     background-repeat: no-repeat;
-    background-size: 100% 100%;
+    background-size: cover, cover;
+    background-position: center, center;
     .plan {
       position: absolute;
       top: 0.1rem;
@@ -1916,5 +2000,48 @@ a {
     border: 1px solid #fff;
     white-space: nowrap;
   }
+}
+
+/* ====== 新增：速度控制 / 底部页签 ====== */
+.speed-ctl {
+  position: absolute;
+  top: 0.16rem;
+  right: 0.9rem;
+  display: flex;
+  align-items: center;
+  font-size: 0.12rem;
+  color: #8b8378;
+
+  i {
+    font-style: normal;
+    margin-right: 0.04rem;
+  }
+
+  b {
+    font-weight: 400;
+    padding: 0.01rem 0.05rem;
+    margin-right: 0.02rem;
+    cursor: pointer;
+    border: 1px solid rgba(255, 255, 255, 0.14);
+    border-radius: 2px;
+    color: #a89e90;
+    transition: all 0.12s ease;
+  }
+
+  b:hover {
+    color: #ffe9b8;
+    border-color: rgba(232, 200, 116, 0.5);
+  }
+
+  b.on {
+    color: #1a1408;
+    background: linear-gradient(180deg, #ffe9b8, #d9b45f);
+    border-color: #ffd76a;
+  }
+}
+
+.tabbar.hide {
+  opacity: 0;
+  pointer-events: none;
 }
 </style>
