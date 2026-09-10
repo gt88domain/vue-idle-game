@@ -1,14 +1,29 @@
 <template>
   <div class="backpackPanel">
-    <div v-for="(v, k) in grid" :key="k">
+    <!-- ==== 新增：筛选栏 ==== -->
+    <div class="bp-filter">
+      <span class="fl">类型</span>
+      <i v-for="t in typeFilters" :key="t.key" :class="{on:filterType==t.key}" @click="filterType = filterType==t.key?'':t.key">{{t.name}}</i>
+      <span class="fl">品质</span>
+      <i v-for="q in qualityFilters" :key="q" :class="{on:filterQuality==q}" @click="filterQuality = filterQuality==q?'':q">{{q||'全部'}}</i>
+      <i class="set-flag" :class="{on:onlySet}" @click="onlySet=!onlySet">只看套装</i>
+      <i class="sort" @click="sortByScore">按评分排序</i>
+    </div>
+    <div class="bp-count" v-if="filterType||filterQuality||onlySet">
+      匹配 {{matchedNum}} 件<span @click="clearFilter">清除筛选</span>
+    </div>
+    <div v-for="(v, k) in grid" :key="k" v-show="matches(v)">
       <div class="grid">
         <div class="title" v-if="v.lv" @contextmenu.prevent="openMenu(k,$event)" @touchstart.stop.prevent="openMenu(k,$event)" @mouseover="showItemInfo($event,v.itemType,v)" @mouseleave="closeItemInfo">
           <div class="icon" :class="{'red-flash':v.enchantlvl>=13}"  :style="{ 'box-shadow': 'inset 0 0 7px 2px ' + v.quality.color }">
-            <img :src="v.type.iconSrc" alt="" />
+            <img :src="iconOf(v)" alt="" />
           </div>
           <div class="title-lock" v-if="v.locked">
             <img src="../../assets/icons/lock.png" alt="">
           </div>
+          <!-- ==== 新增：套装角标 + 评分 ==== -->
+          <div class="set-badge" v-if="v.setId" :style="{background:v.setColor}"></div>
+          <div class="item-score" v-if="v.lv">{{score(v)}}</div>
         </div>
       </div>
     </div>
@@ -49,10 +64,35 @@
 </template>
 <script>
 import { assist } from '../../assets/js/assist';
+import { scoreEquipment } from '../../assets/js/battle';
+import { SETS } from '../../assets/config/sets';
+import { resolveIcon } from '@/assets/config/artMap'
+
 export default {
   name: "backpackPanel",
   data() {
     return {
+      filterType: '',
+      filterQuality: '',
+      onlySet: false,
+      typeFilters: [{
+          key: 'weapon',
+          name: '武器'
+        },
+        {
+          key: 'armor',
+          name: '防具'
+        },
+        {
+          key: 'ring',
+          name: '戒指'
+        },
+        {
+          key: 'neck',
+          name: '项链'
+        }
+      ],
+      qualityFilters: ['', '破旧', '普通', '神器', '史诗', '独特'],
       grid: [],
       left: '',
       top: '',
@@ -77,6 +117,30 @@ export default {
     },
   },
   computed: {
+    matchedNum() {
+      return this.grid.filter(v => this.matches(v)).length
+    },
+    setProgress() {
+      // 每个套装在当前背包+身上共有几件
+      const owned = {}
+      this.grid.forEach(v => {
+        if (v && v.setId) {
+          owned[v.setId] = (owned[v.setId] || 0) + 1
+        }
+      })
+      const p = this.$store.state.playerAttribute
+      ;[p.weapon, p.armor, p.ring, p.neck].forEach(v => {
+        if (v && v.setId) {
+          owned[v.setId] = (owned[v.setId] || 0) + 1
+        }
+      })
+      return SETS.map(set => ({
+        id: set.id,
+        name: set.name,
+        color: set.color,
+        num: owned[set.id] || 0
+      }))
+    },
     itemNum() {
       let count = 0
       this.grid.map((item) => {
@@ -151,6 +215,46 @@ export default {
 
   },
   methods: {
+    iconOf(item) {
+      return resolveIcon((item || {}).type)
+    },
+    // ==== 新增：筛选 / 评分 / 排序 ====
+    matches(v) {
+      if (!v || !v.lv) {
+        return !(this.filterType || this.filterQuality || this.onlySet)
+      }
+      if (this.filterType && v.itemType != this.filterType) {
+        return false
+      }
+      if (this.filterQuality && (!v.quality || v.quality.name != this.filterQuality)) {
+        return false
+      }
+      if (this.onlySet && !v.setId) {
+        return false
+      }
+      return true
+    },
+    clearFilter() {
+      this.filterType = ''
+      this.filterQuality = ''
+      this.onlySet = false
+    },
+    score(v) {
+      return scoreEquipment(v)
+    },
+    sortByScore() {
+      var items = this.grid.filter(v => v && JSON.stringify(v) != '{}')
+      items.sort((a, b) => scoreEquipment(b) - scoreEquipment(a))
+      var tem = new Array(this.grid.length).fill({})
+      items.map((item, index) => {
+        tem[index] = item
+      })
+      this.grid = this.$deepCopy(tem)
+      this.$store.commit('set_sys_info', {
+        msg: `背包已按装备评分从高到低排好。`,
+        type: 'win'
+      });
+    },
     // 点击span仍然可以设置input的值，操作的是数组，所以需要$set来实现双向绑定
     setAutoSell(index){
       this.$set(this.autoSell,index,!this.autoSell[index])
@@ -173,6 +277,22 @@ export default {
     },
     // 一键出售
     sell() {
+      // 新增：批量出售前给套装部件一次确认机会
+      var setNum = this.grid.filter(v => v && v.setId && !v.locked).length
+      if (setNum && !this._sellConfirmed) {
+        this.$message({
+          message: `背包里有 ${setNum} 件套装部件，真的要一起卖掉吗？`,
+          title: '再确认一下',
+          closeBtnText: '手滑了',
+          confirmBtnText: '全卖掉',
+          onClose: () => {
+            this._sellConfirmed = true
+            this.sell()
+            this._sellConfirmed = false
+          }
+        })
+        return
+      }
       this.grid.map((item, index) => {
         if (JSON.stringify(item) != '{}') {
           this.currentItemIndex = index
@@ -277,10 +397,11 @@ export default {
 <style lang="scss" scoped>
 .backpackPanel {
   width: 5.02rem;
-  height: 3.1rem;
+  height: 3.66rem;
   display: flex;
   flex-wrap: wrap;
-  padding: 0.14rem 0.14rem 0.14rem;
+  align-content: flex-start;
+  padding: 0.5rem 0.14rem 0.14rem; // 顶部留出筛选栏位置（新增）
   justify-items: flex-start;
   align-items: flex-start;
   position: relative;
@@ -422,4 +543,57 @@ export default {
     cursor: pointer;
   }
 }
+/* ==== 新增：筛选栏 / 套装角标 / 评分 ==== */
+.bp-filter {
+  position: absolute;
+  top: 0.06rem;
+  left: 0.06rem;
+  right: 0.06rem;
+  z-index: 4;
+  font-size: 0.13rem;
+  color: #999;
+  .fl { margin: 0 0.04rem; }
+  i {
+    display: inline-block;
+    padding: 0 0.06rem;
+    margin-right: 0.04rem;
+    border: 1px solid #555;
+    cursor: pointer;
+    &.on { color: #111; background: #8dff9e; border-color: #8dff9e; }
+  }
+  .set-flag.on { background: #ffd76b; border-color: #ffd76b; }
+  .sort { border-color: #68d5ed; color: #68d5ed; margin-left: 0.08rem; }
+}
+.bp-count {
+  position: absolute;
+  top: 0.32rem;
+  left: 0.08rem;
+  z-index: 4;
+  font-size: 0.12rem;
+  color: #8dff9e;
+  span { color: #888; text-decoration: underline; cursor: pointer; margin-left: 0.08rem; }
+}
+.grid .title {
+  position: relative;
+  .set-badge {
+    position: absolute;
+    right: -0.03rem;
+    top: -0.03rem;
+    width: 0.1rem;
+    height: 0.1rem;
+    border-radius: 50%;
+    box-shadow: 0 0 4px 0 currentColor;
+  }
+  .item-score {
+    position: absolute;
+    left: 0;
+    bottom: -0.02rem;
+    right: 0;
+    text-align: center;
+    font-size: 0.11rem;
+    color: #cfd8dc;
+    text-shadow: 0 0 3px #000;
+  }
+}
+
 </style>

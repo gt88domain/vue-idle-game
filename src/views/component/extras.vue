@@ -14,6 +14,8 @@
             <h1> {{item.title}}</h1>
             <span v-if="item.desc"> {{item.desc}}</span>
             <h2 class="vision" v-for="(v) in item.vision" :key="v.id" v-if="item.vision">{{v.vision}}:<a :href="v.href" target="_blank"> {{v.href}}</a></h2>
+            <h2 v-if="item.major">新增内容</h2>
+            <p class="major" v-for="(v) in item.major" :key="v.id" v-if="item.major">{{v}}</p>
             <h2 v-if="item.adjust">功能调整</h2>
             <p v-for="(v) in item.adjust" :key="v.id">{{v}}</p>
             <h2 v-if="item.majorization">优化</h2>
@@ -62,6 +64,26 @@ export default {
       keyCode: [38, 38, 40, 40, 37, 39, 37, 39, 66, 65, 66, 65],
       reKeyCode: [],
       update: [
+        {
+          title: '2026-09-10 (1.4.0) 复刻增强版',
+          desc: '- 本次更新在完整保留原版数值管线的前提下，补齐了作者当年预告却未实现的套装，并新增两套独立玩法。',
+          major: [
+            '- 【补完预告】套装系统：困难/极难副本有几率掉出套装底材，2/4 件激活（狂战之怒、影袭之约、圣殿守卫、贪婪之旅）；',
+            '- 【新模式】深渊回廊：以开局面板为锚点的 roguelike 爬层，每层三选一祝福，随时撤退带走「回响」，死亡只保留 60%；',
+            '- 【新模式】深渊祭坛：回响兑换永久强化（攻击/生命/护甲/金币/幸运/祝福数/死亡保留/离线上限/速度/反伤），对主世界同样生效；',
+            '- 【新玩法】离线挂机收益：关闭页面也在赚金币（离线效率 45%，上限 8 小时，可用祭坛延长到 16 小时）；',
+            '- 【新玩法】自动征战：勾选后副本自动重复挑战/自动爬无尽层，死亡或背包满自动停止；',
+            '- 【新玩法】成就与称号：16 条成就，达成解锁全局被动称号，同时只能佩戴一个（要做取舍）；',
+            '- 【新属性】反伤、吸血、闪避、固定减伤、穿透、处决、幸运等接入战斗解算，全部按期望值并入原版「竞速」模型；',
+            '- 【优化】背包支持按类型/品质/套装筛选与按评分排序，出售套装部件前会二次确认；',
+            '- 【优化】词条重铸可锁定单条词条，幸运会提供额外重 roll 并保留更好结果；',
+            '- 【优化】强化面板显示当前成功率与加成来源；',
+            '- 【优化】移除百度统计脚本；存档新增 ex 字段（旧存档可直接导入，不受影响）。'
+          ],
+          adjust: [
+            '- 装备生成、属性聚合、战斗解算与原版逐项一致，仓库内置 `npm run fidelity` 保真度校验（760+ 组随机对比）。'
+          ]
+        },
         {
           title: '历史版本',
           vision: [{
@@ -209,7 +231,7 @@ export default {
     };
   },
   mounted() {
-    this.checkedUpdateInfo = localStorage.getItem('version') == "1.2.2" ? true : false
+    this.checkedUpdateInfo = localStorage.getItem('version') == "1.4.0" ? true : false
   },
   methods: {
     eastereEgg1(e) {
@@ -242,7 +264,7 @@ export default {
       localStorage.setItem('version', '1.2.2')
     },
     closePanel() {
-      localStorage.setItem('version', '1.2.2')
+      localStorage.setItem('version', '1.4.0')
       this.showExtrasInfo = false
     },
     navToGithub() {
@@ -467,5 +489,9 @@ export default {
       text-align: center;
     }
   }
+}
+.drawer-update .scroll .major {
+  color: #8dff9e;
+  line-height: .26rem;
 }
 </style>

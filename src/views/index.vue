@@ -1,5 +1,6 @@
 <template>
   <div class="main" @contextmenu.prevent="contextmenu($event)">
+    <TitleScreen v-if="showTitle" @enter="onTitleEnter"></TitleScreen>
     <div class="user-status">
 
       <cTooltip placement="bottom">
@@ -9,6 +10,15 @@
               <span>lv {{playerLv}}</span>
               <span style="font-size:0.16rem">转生次数：{{$store.state.reincarnation.count}}</span>
             </div>
+          </div>
+          <div class="title-line" v-if="curTitle" @click="openAchv('title')">
+            <span class="tt">{{curTitle.name}}</span>
+            <span class="tb">{{totalTitleBonus}}</span>
+          </div>
+          <div class="set-line" v-if="activeSets.length" @click="openAchv('achv')">
+            <span class="s-chip" v-for="v in activeSets" :key="v.id" :style="{color:v.color,borderColor:v.color}">
+              {{v.name}} {{v.num}}/4
+            </span>
           </div>
         </template>
         <template v-slot:tip>
@@ -161,33 +171,33 @@
       </div>
 
       <div class="weapon" @mouseover="showItemInfo($event,'weapon',playerWeapon,false)" @mouseleave="closeItemInfo">
-        <div class="title" v-if="playerWeapon">
+        <div class="title q-frame" :class="'q-'+(playerWeapon.quality||{}).name" v-if="playerWeapon">
           <div class='icon' :class="{'red-flash':playerWeapon.enchantlvl>=13,unique:playerWeapon.quality.name=='独特'}" :style="{'box-shadow':'inset 0 0 7px 2px '+playerWeapon.quality.color}">
-            <img :src="playerWeapon.type.iconSrc" alt="">
+            <img :src="iconOf(playerWeapon)" alt="">
           </div>
           <div class='name' :style="{color:playerWeapon.quality.color}">{{playerWeapon.type.name}} {{playerWeapon.enchantlvl?'(+'+playerWeapon.enchantlvl+')':''}}</div>
         </div>
       </div>
       <div class="armor" @mouseover="showItemInfo($event,'armor',playerArmor,false)" @mouseleave="closeItemInfo">
-        <div class="title" v-if="playerArmor">
+        <div class="title q-frame" :class="'q-'+(playerArmor.quality||{}).name" v-if="playerArmor">
           <div class='icon' :class="{'red-flash':playerArmor.enchantlvl>=13,unique:playerArmor.quality.name=='独特'}" :style="{'box-shadow':'inset 0 0 7px 2px  '+playerArmor.quality.color}">
-            <img :src="playerArmor.type.iconSrc" alt="">
+            <img :src="iconOf(playerArmor)" alt="">
           </div>
           <div class='name' :style="{color:playerArmor.quality.color}">{{playerArmor.type.name}} {{playerArmor.enchantlvl?'(+'+playerArmor.enchantlvl+')':''}}</div>
         </div>
       </div>
       <div class="neck" @mouseover="showItemInfo($event,'neck',playerNeck,false)" @mouseleave="closeItemInfo">
-        <div class="title" v-if="playerNeck">
+        <div class="title q-frame" :class="'q-'+(playerNeck.quality||{}).name" v-if="playerNeck">
           <div class='icon' :class="{'red-flash':playerNeck.enchantlvl>=13,unique:playerNeck.quality.name=='独特'}" :style="{'box-shadow':'inset 0 0 7px 2px '+playerNeck.quality.color}">
-            <img :src="playerNeck.type.iconSrc" alt="">
+            <img :src="iconOf(playerNeck)" alt="">
           </div>
           <div class='name' :style="{color:playerNeck.quality.color}">{{playerNeck.type.name}} {{playerNeck.enchantlvl?'(+'+playerNeck.enchantlvl+')':''}}</div>
         </div>
       </div>
       <div class="ring" @mouseover="showItemInfo($event,'ring',playerRing,false)" @mouseleave="closeItemInfo">
-        <div class="title" v-if="playerRing">
+        <div class="title q-frame" :class="'q-'+(playerRing.quality||{}).name" v-if="playerRing">
           <div class='icon' :class="{'red-flash':playerRing.enchantlvl>=13,unique:playerRing.quality.name=='独特'}" :style="{'box-shadow':'inset 0 0 7px 2px '+playerRing.quality.color}">
-            <img :src="playerRing.type.iconSrc" alt="">
+            <img :src="iconOf(playerRing)" alt="">
           </div>
           <div class='name' :style="{color:playerRing.quality.color}">{{playerRing.type.name}} {{playerRing.enchantlvl?'(+'+playerRing.enchantlvl+')':''}}</div>
         </div>
@@ -195,6 +205,10 @@
     </div>
     <div class="sys-info">
       <div class="clear" @click="clearSysInfo">清除信息</div>
+      <div class="speed-ctl on-art" title="推进/战斗速度：只改变动画节奏，不改变任何结算结果">
+        <i>速度</i>
+        <b v-for="sp in [1,2,4]" :key="sp" :class="{on: speed==sp}" @click="setSpeed(sp)">{{sp}}x</b>
+      </div>
       <div id='sysInfo'>
         <div class="info warning" :class="{warning:v.type=='warning',battle:v.type=='battle',win:v.type=='win',trophy:v.type=='trophy',}" v-for="(v,k) in sysInfo" :key="k">系统<i style="font-size:.12rem" v-if="v.time">({{v.time}})</i>：
           <span>{{v.msg}}</span>
@@ -230,15 +244,18 @@
           <p>- 副本难度等级分为：普通，困难，极难</p>
           <p>- 难度越高装备爆率也相应提升</p>
           <p>- 困难，极难仅能挑战一次</p>
-          <p>- 困难，极难下有几率出现套装装备(下个版本加入)</p>
+          <p>- 困难，极难下有几率掉出<b>套装</b>装备（共 {{setTotal}} 套，2/4 件激活）</p>
+          <p v-if="activeSets.length">- 已激活套装：<span v-for="v in activeSets" :key="v.id" :style="{color:v.color}">{{v.name}}({{v.num}}件) </span></p>
         </div>
         <div class="handle">
           <div v-if="dungeons.type!='endless'">
             <p v-if="dungeons.difficulty==1"><input type="checkbox" name="" v-model="reChallenge"> 重复挑战</p>
+            <p v-if="dungeons.difficulty==1"><input type="checkbox" name="" v-model="autoFarm"> 自动征战（挂机刷本）</p>
           </div>
           <div class="handle-column" style="display:flex;flex-direction:column" v-else>
             <p><input type="checkbox" name="" v-model="upEChallenge"> 向上挑战</p>
             <p><input type="checkbox" name="" v-model="reEChallenge"> 重复挑战</p>
+            <p><input type="checkbox" name="" v-model="autoFarm"> 自动征战（自动爬层）</p>
           </div>
           <div class="dungeons-btn" @click="eventBegin()">开始挑战</div>
         </div>
@@ -248,6 +265,9 @@
         <span>lv{{v.lv}}</span>
       </div>
       <div class="event-icon endless" v-if="endlessLv&&playerLv>=10" @click="showEndlessDungeonsInfo()" v-show='!inDungeons' style="top: 6%;left: 16%;"><i class="icon-image"></i><span>无尽</span></div>
+      <div class="event-icon abyss-entry" :class="{dim:!abyssUnlocked}" v-if="!inDungeons" @click="openAbyss()" style="top: 6%;left: 4%;">
+        <i class="icon-image"></i><span>深渊</span>
+      </div>
     </div>
     <div class="menu">
 
@@ -270,6 +290,34 @@
         </template>
         <template v-slot:tip>
           <p class="info">* 商 店</p>
+        </template>
+      </cTooltip>
+
+      <cTooltip :placement="'top'">
+        <template v-slot:content>
+          <div class="Backpack abyss-btn" :class="{lock:!abyssUnlocked}" @click="openAbyss()">
+            <img src="../assets/icons/menu/d3.png" alt="">
+          </div>
+        </template>
+        <template v-slot:tip>
+          <p class="info">* 深渊回廊（新模式）</p>
+          <p class="info">* 逐层挑战，每层三选一叠加祝福</p>
+          <p class="info">* 随时撤退带走「回响」，死亡只保留 60%</p>
+          <p class="info">* 回响可在深渊祭坛购买永久强化（对主世界有效）</p>
+          <p class="info">* lv10 或开启无尽后解锁</p>
+        </template>
+      </cTooltip>
+
+      <cTooltip :placement="'top'">
+        <template v-slot:content>
+          <div class="Backpack" @click="openAchv()">
+            <img src="../assets/icons/menu/quest_icon_07.png" alt="">
+          </div>
+        </template>
+        <template v-slot:tip>
+          <p class="info">* 成就与称号</p>
+          <p class="info">* 达成成就解锁全局被动称号（同时只能佩戴一个）</p>
+          <p class="info">* 这里也能开关离线收益、自动征战</p>
         </template>
       </cTooltip>
 
@@ -424,6 +472,20 @@
         </div>
       </div>
     </div>
+    <abyssPanel ref="abyss"></abyssPanel>
+    <achievementsPanel ref="achv"></achievementsPanel>
+    <heroPanel ref="hero"></heroPanel>
+    <campaignPanel ref="camp"></campaignPanel>
+    <dailyPanel ref="daily"></dailyPanel>
+
+    <!-- 新增：手游式底部页签，一级功能常驻 -->
+    <div class="tabbar" :class="{hide: showTitle}">
+      <div v-for="t in tabs" :key="t.key" class="tabbar-item btn-press" :class="{on: activeTab==t.key}" @click="openTab(t.key)">
+        <img :src="t.icon" alt="">
+        <span>{{t.name}}</span>
+        <i class="dot" v-if="t.badge">{{t.badge}}</i>
+      </div>
+    </div>
     <extras></extras>
     <qa></qa>
     <setting></setting>
@@ -443,9 +505,20 @@ import extras from './component/extras'
 import setting from './component/setting'
 import qa from './component/qa'
 import cTooltip from './uiComponent/tooltip'
+import abyssPanel from './component/abyssPanel'
+import achievementsPanel from './component/achievementsPanel'
 import { assist } from '../assets/js/assist';
 import { Base64 } from 'js-base64';
 import handle from '../assets/js/handle'
+import { calcOfflineGain } from '../assets/js/offline'
+import { TITLES } from '../assets/config/achievements'
+import { SETS, getSetByName } from '../assets/config/sets'
+import TitleScreen from './titleScreen'
+import heroPanel from './component/heroPanel'
+import campaignPanel from './component/campaignPanel'
+import dailyPanel from './component/dailyPanel'
+import sfx, { sfxForSysInfo } from '../assets/js/sfx'
+import { resolveIcon } from '../assets/config/artMap'
 export default {
   name: "index",
   mixins: [assist],
@@ -485,13 +558,17 @@ export default {
       GMPlayerLv: 1,
       GMOpened: false,
       needComparison: true,
+      offlineGain: null,
+      showTitle: true,
+      activeTab: '',
       saveData: {},
       saveDateString: '',
       debounceTime: {},  //防抖计时器
     };
   },
-  components: { weaponPanel, armorPanel, ringPanel, neckPanel, dungeons, backpackPanel, shopPanel, cTooltip, strengthenEquipment, extras, qa, setting, reinPanel },
+  components: { weaponPanel, armorPanel, ringPanel, neckPanel, dungeons, backpackPanel, shopPanel, cTooltip, strengthenEquipment, extras, qa, setting, reinPanel, abyssPanel, achievementsPanel, TitleScreen, heroPanel, campaignPanel, dailyPanel },
   created() {
+    this._sessionStart = Date.now()
     // 窗口自适应
     window.onresize = () => {
       if (this.debounceTime) {
@@ -511,7 +588,24 @@ export default {
     });
 
   },
+  beforeDestroy() {
+    // 新增：清掉本 fork 引入的计时器（原版的 autoHealthRecovery 保持原样）
+    if (this.dailyRollTimer) {
+      clearInterval(this.dailyRollTimer)
+      this.dailyRollTimer = null
+    }
+    if (this.campTickTimer) {
+      clearInterval(this.campTickTimer)
+      this.campTickTimer = null
+    }
+  },
   mounted() {
+    // 新增：每日任务/签到按日期滚动（跨零点自动换一批，60 秒检查一次足够）
+    this.$store.commit('daily_rollover')
+    this.dailyRollTimer = setInterval(() => {
+      this.$store.commit('daily_rollover')
+    }, 60 * 1000)
+
     // 自动回血
     this.autoHealthRecovery = setInterval(() => {
       this.$store.commit('set_player_curhp', this.healthRecoverySpeed * (this.attribute.MAXHP.value / 50))
@@ -540,6 +634,11 @@ export default {
     this.loadGame(sd)
     //生成随机副本
     this.createdDungeons()
+    // ==== 新增：离线收益结算 + 成就补发 ====
+    this.$nextTick(() => {
+      this.settleOffline()
+      this.$store.commit('check_achievements')
+    })
   },
   computed: {
     attribute() { return this.$store.state.playerAttribute.attribute },
@@ -551,10 +650,79 @@ export default {
     playerNeck() { return this.$store.state.playerAttribute.neck },
     endlessLv() { return this.$store.state.playerAttribute.endlessLv },
     playerLv() { return this.$store.state.playerAttribute.lv },
-    operatorSchemaIsMobile() { return this.$store.state.operatorSchemaIsMobile }
+    operatorSchemaIsMobile() { return this.$store.state.operatorSchemaIsMobile },
+    // ==== 新增 ====
+    abyss() { return this.$store.state.abyss },
+    abyssUnlocked() { return this.playerLv >= 10 || this.abyss.bestFloor > 0 },
+    curTitle() { return TITLES[this.$store.state.title] || null },
+    setTotal() { return SETS.length },
+    activeSets() { return this.$store.state.setDetail },
+    autoFarm: {
+      get() { return this.$store.state.settings.autoFarm },
+      set(v) {
+        this.$store.commit('set_settings', { autoFarm: v })
+        this.$store.commit('set_sys_info', {
+          msg: v ? `自动征战已开启：通关后会自动重复挑战当前副本，直到失败或背包满。` : `自动征战已关闭。`,
+          type: v ? 'win' : 'warning'
+        })
+      }
+    },
+    speed() {
+      return Number(this.$store.state.settings.speed || 1)
+    },
+    heroes() {
+      return this.$store.state.heroes || {}
+    },
+    campBadge() {
+      const st = this.$store.state.stats || {}
+      const n = Number(st.stageStars || 0)
+      return n ? n + '★' : ''
+    },
+    dailyBadge() {
+      const d = this.$store.state.daily || {}
+      const stats = this.$store.state.stats
+      let n = 0
+      ;(d.quests || []).forEach(q => {
+        if (!q.claimed && Number(stats[q.key] || 0) - Number(q.base || 0) >= q.goal) {
+          n++
+        }
+      })
+      const day = new Date()
+      const key = day.getFullYear() + '-' + ('0' + (day.getMonth() + 1)).slice(-2) + '-' + ('0' + day.getDate()).slice(-2)
+      if (d.signDate !== key) {
+        n++
+      }
+      return n ? String(n) : ''
+    },
+    tabs() {
+      return [{
+        key: 'backpack', name: '背包', icon: './icons/menu/quest_icon_02.png', badge: ''
+      }, {
+        key: 'camp', name: '章节', icon: './icons/menu/d1.png', badge: this.campBadge
+      }, {
+        key: 'daily', name: '每日', icon: './icons/menu/d2.png', badge: this.dailyBadge
+      }, {
+        key: 'shop', name: '商店', icon: './icons/menu/quest_icon_03.png', badge: ''
+      }, {
+        key: 'hero', name: '英雄', icon: './icons/menu/icon_85.png', badge: this.heroes.tickets ? String(this.heroes.tickets) : ''
+      }, {
+        key: 'abyss', name: '深渊', icon: './icons/menu/d3.png', badge: this.abyss.bestFloor ? String(this.abyss.bestFloor) : ''
+      }, {
+        key: 'achv', name: '成就', icon: './icons/menu/clear.png', badge: ''
+      }, {
+        key: 'rein', name: '转生', icon: './icons/menu/quest_icon_00.png', badge: this.$store.state.reincarnation.point > 0 ? '+' : ''
+      }]
+    },
+    totalTitleBonus() {
+      var b = this.$store.state.bonus
+      var keys = Object.keys(b)
+      if (!keys.length) { return '' }
+      return keys.slice(0, 3).map(k => k + '+' + Math.round(b[k] * 10) / 10 + '%').join(' ')
+    }
   },
   watch: {
-    sysInfo() {
+    sysInfo(list) {
+      sfxForSysInfo(list && list.length ? list[list.length - 1] : null)
       var element = document.getElementById('sysInfo')
       //渲染完成后滚至最下端
       this.$nextTick(() => {
@@ -577,8 +745,104 @@ export default {
     }
   },
   methods: {
+    iconOf(eq) {
+      return resolveIcon((eq || {}).type)
+    },
+    onTitleEnter(payload) {
+      if (payload && payload.fresh) {
+        localStorage.removeItem('_sd')
+        location.reload()
+        return
+      }
+      this.showTitle = false
+      sfx.play('victory')
+      this.$store.commit('set_sys_info', {
+        msg: `欢迎回来，勇士。底部页签可以打开 背包 / 商店 / 英雄 / 深渊 / 成就。`,
+        type: ''
+      })
+    },
+    setSpeed(v) {
+      this.$store.commit('set_settings', { speed: v })
+      sfx.play('click')
+    },
+    openTab(key) {
+      this.activeTab = this.activeTab === key ? '' : key
+      sfx.play('tab')
+      if (key === 'hero') {
+        this.$refs.hero.open()
+      } else if (key === 'camp') {
+        this.$refs.camp.open()
+      } else if (key === 'daily') {
+        this.$refs.daily.open()
+      } else if (key === 'abyss') {
+        this.openAbyss()
+      } else if (key === 'achv') {
+        this.openAchv()
+      } else {
+        this.openMenuPanel(key)
+      }
+    },
     navToGithub() {
       window.open('https://github.com/Couy69/vue-idle-game', '_blank');
+    },
+    // ==== 新增：深渊回廊 / 成就面板 ====
+    openAbyss() {
+      if (!this.abyssUnlocked) {
+        this.$store.commit('set_sys_info', {
+          msg: `深渊之门还没有为你打开：先把人物练到 lv10（或开启无尽挑战）吧。`,
+          type: 'warning'
+        });
+        return
+      }
+      if (this.inDungeons) {
+        this.$store.commit('set_sys_info', {
+          msg: `正在副本里呢，先结束当前挑战。`,
+          type: 'warning'
+        });
+        return
+      }
+      this.$refs.abyss.open()
+    },
+    openAchv(tab) {
+      this.$refs.achv.open(tab)
+    },
+    /**
+     * 新增：离线挂机收益结算
+     */
+    settleOffline() {
+      var gain = calcOfflineGain(this.$store.state.lastSaveTime, {
+        playerLv: this.playerLv,
+        endlessLv: this.endlessLv,
+        attribute: this.attribute,
+        bonus: this.$store.state.bonus,
+        settings: this.$store.state.settings
+      })
+      if (!gain) {
+        return
+      }
+      this.offlineGain = gain
+      this.$store.commit('set_player_gold', gain.gold)
+      this.$store.commit('report', {
+        key: 'offlineCount',
+        num: 1
+      })
+      if (gain.fullHeal) {
+        this.$store.commit('set_player_curhp', 'full')
+      }
+      var hours = gain.hours >= 1 ? gain.hours.toFixed(1) + ' 小时' : Math.round(gain.hours * 60) + ' 分钟'
+      var scope = gain.endless ? `无尽第 ${this.endlessLv} 层的推进效率` : `lv${gain.dungeonLv} 副本的推进效率`
+      this.$message({
+        title: '离线挂机收益',
+        message: `你离开的 ${hours}里，勇者按${scope}继续刷本（离线效率 45%），共获得 ${gain.gold} 金币${gain.capped ? `（已达 ${gain.capHours} 小时上限）` : ''}。`,
+        closeBtnText: '知道了',
+        confirmBtnText: '继续冒险',
+        onClose: () => {},
+        onCancle: () => {}
+      })
+      this.$store.commit('set_sys_info', {
+        msg: `离线 ${hours} 结算：金币 +${gain.gold}`,
+        type: 'trophy'
+      });
     },
     /**
      * 刷新副本
@@ -651,6 +915,31 @@ export default {
         }
       }
     },
+    // 新增：把新玩法的状态一并写入存档（旧存档没有 ex 字段也能正常读取）
+    buildExtraSave() {
+      var st = this.$store.state
+      return {
+        title: st.title || '',
+        unlockedAchievements: Object.assign({}, st.unlockedAchievements),
+        stats: Object.assign({}, st.stats),
+        settings: Object.assign({}, st.settings, {
+          autoFarm: false
+        }),
+        abyss: {
+          echoes: st.abyss.echoes,
+          totalEchoes: st.abyss.totalEchoes,
+          runs: st.abyss.runs,
+          wins: st.abyss.wins,
+          bestFloor: st.abyss.bestFloor,
+          perks: Object.assign({}, st.abyss.perks)
+        },
+        heroes: JSON.parse(JSON.stringify(st.heroes || {})),
+        campaign: JSON.parse(JSON.stringify(st.campaign || {})),
+        daily: JSON.parse(JSON.stringify(st.daily || {})),
+        ultCharge: st.ultCharge || 0,
+        t: Date.now()
+      }
+    },
     copySavaData() {
       var imSavadataTextArea = document.getElementById("imSavedata");
       imSavadataTextArea.select(); // 选中文本
@@ -687,7 +976,8 @@ export default {
         r: {
           count: this.$store.state.reincarnation.count,
           point: this.$store.state.reincarnation.point,
-        }
+        },
+        ex: this.buildExtraSave()
       }
       this.saveDateString = Base64.encode(Base64.encode(JSON.stringify(data)))
     },
@@ -742,16 +1032,25 @@ export default {
         r: {
           count: this.$store.state.reincarnation.count,
           point: this.$store.state.reincarnation.point,
-        }
+        },
+        ex: this.buildExtraSave()
       }
       var saveData = Base64.encode(Base64.encode(JSON.stringify(data)))
       localStorage.setItem('_sd', saveData)
+      // 新增：记录保存时间，用于离线收益结算
+      this.$store.commit('set_last_save_time', Date.now())
 
       needInfo && this.$store.commit("set_sys_info", {
         msg: `
               游戏进度已经保存了。
             `,
         type: 'win'
+      });
+      // 新增：累计游玩时长
+      this.$store.commit('report', {
+        key: 'playTime',
+        num: Math.round((Date.now() - (this._sessionStart || Date.now())) / 60000),
+        check: false
       });
     },
     loadGame(sd) {
@@ -781,6 +1080,50 @@ export default {
             }
           }
           this.saveData.lv = this.saveData.lv ? this.saveData.lv : 1
+          // ==== 新增：读取新玩法存档（缺失字段一律兼容）====
+          if (this.saveData.ex) {
+            var ex = this.saveData.ex
+            if (ex.abyss) {
+              this.$store.commit('set_abyss', {
+                echoes: ex.abyss.echoes || 0,
+                totalEchoes: ex.abyss.totalEchoes || 0,
+                runs: ex.abyss.runs || 0,
+                wins: ex.abyss.wins || 0,
+                bestFloor: ex.abyss.bestFloor || 0,
+                perks: ex.abyss.perks || {},
+                run: null
+              })
+            }
+            if (ex.heroes) {
+              this.$store.commit('set_heroes', ex.heroes)
+            }
+            if (ex.campaign) {
+              this.$store.commit('set_campaign', ex.campaign)
+            }
+            if (ex.daily) {
+              this.$store.commit('set_daily', ex.daily)
+            }
+            this.$store.commit('set_ult_charge', ex.ultCharge || 0)
+            this.$store.commit('set_title', ex.title || '')
+            if (ex.unlockedAchievements) {
+              this.$store.replaceState(Object.assign({}, this.$store.state, {
+                unlockedAchievements: ex.unlockedAchievements
+              }))
+            }
+            if (ex.stats) {
+              Object.keys(this.$store.state.stats).forEach(k => {
+                if (typeof ex.stats[k] == 'number') {
+                  this.$store.state.stats[k] = ex.stats[k]
+                }
+              })
+            }
+            if (ex.settings) {
+              this.$store.commit('set_settings', Object.assign({}, ex.settings, {
+                autoFarm: false
+              }))
+            }
+            this.$store.commit('set_last_save_time', ex.t || 0)
+          }
           var backpackPanel = this.findComponentDownward(
             this,
             "backpackPanel",
@@ -839,6 +1182,10 @@ export default {
           this.$store.commit('set_player_armor', this.$deepCopy(this.playerArmor))
           this.$store.commit('set_player_neck', this.$deepCopy(this.playerNeck))
         }
+
+        // 新增：每日任务/签到必须等整份存档（统计值、等级）就位后再按日期滚动，
+        // 否则「当日增量」的基准会取到恢复前的 0，读档就直接白拿奖励
+        this.$store.commit('daily_rollover')
 
         this.$store.commit("set_sys_info", {
           msg: `
@@ -995,6 +1342,11 @@ export default {
     closePanel() {
       this.backpackPanelOpened = this.shopPanelOpened = this.importSaveDataPanelOpened = this.exportSaveDataPanelOpened = this.strengthenEquipmentPanelOpened = this.reinPanelOpened = false
       this.GMOpened = false
+      // 新增：一并关闭深渊 / 成就面板
+      this.$refs.abyss && (this.$refs.abyss.visible = false)
+      this.$refs.achv && (this.$refs.achv.visible = false)
+      this.$refs.camp && (this.$refs.camp.visible = false)
+      this.$refs.daily && (this.$refs.daily.visible = false)
       this.saveDateString = ''
 
       let equimentPanel = this.findComponentDownward(
@@ -1153,6 +1505,40 @@ a {
         align-items: center;
       }
     }
+    // ==== 新增：称号与套装激活状态 ====
+    .title-line {
+      cursor: pointer;
+      width: 100%;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      border: 2px solid #ffd76b;
+      padding: 0.02rem 0.1rem;
+      margin-bottom: 0.1rem;
+      font-size: 0.14rem;
+      .tt {
+        color: #ffd76b;
+        font-weight: bold;
+      }
+      .tb {
+        color: #999;
+        font-size: 0.12rem;
+      }
+    }
+    .set-line {
+      width: 100%;
+      display: flex;
+      flex-wrap: wrap;
+      margin-bottom: 0.06rem;
+      cursor: pointer;
+      .s-chip {
+        font-size: 0.12rem;
+        border: 1px solid;
+        padding: 0 0.05rem;
+        margin: 0 0.04rem 0.04rem 0;
+        opacity: 0.9;
+      }
+    }
     .other {
       img {
         width: 0.35rem !important;
@@ -1209,7 +1595,7 @@ a {
     }
     .uii {
       display: flex;
-      width: calc(100% -0.4rem);
+      width: calc(100% - 0.4rem);
     }
     .gold {
       cursor: pointer;
@@ -1256,7 +1642,7 @@ a {
   .sys-info {
     position: absolute;
     border: 2px solid #ccc;
-    height: calc(100% - 4.4rem);
+    height: calc(100% - 4.9rem);
     width: 8.1rem;
     bottom: 0.1rem;
     left: 0.1rem;
@@ -1308,11 +1694,13 @@ a {
     right: 0.1rem;
     left: 8.3rem;
     top: 0.1rem;
-    bottom: 0.1rem;
+    bottom: 0.62rem;
     border: 2px solid #ccc;
-    background-image: url(../assets/img/map.jpg);
+    /* 新增：地图换成生成的场景图，加一层压暗渐变保证图标与文字可读 */
+    background-image: linear-gradient(180deg, rgba(6, 6, 8, 0.3), rgba(4, 4, 6, 0.6)), url(../assets/art/map.jpg);
     background-repeat: no-repeat;
-    background-size: 100% 100%;
+    background-size: cover, cover;
+    background-position: center, center;
     .plan {
       position: absolute;
       top: 0.1rem;
@@ -1410,6 +1798,21 @@ a {
       }
       span {
         border-top: 1px solid rgba(245, 69, 0, 0.6);
+      }
+    }
+    // ==== 新增：深渊回廊入口 ====
+    .abyss-entry {
+      box-shadow: 0 0 4px 4px rgba(141, 255, 158, 0.45);
+      .icon-image {
+        background-image: url(../assets/icons/menu/d1.png);
+        background-color: rgba(75, 123, 236, 0.75);
+      }
+      span {
+        border-top: 1px solid rgba(141, 255, 158, 0.6);
+      }
+      &.dim {
+        opacity: 0.4;
+        filter: grayscale(1);
       }
     }
   }
@@ -1661,5 +2064,48 @@ a {
     border: 1px solid #fff;
     white-space: nowrap;
   }
+}
+
+/* ====== 新增：速度控制 / 底部页签 ====== */
+.speed-ctl {
+  position: absolute;
+  top: 0.16rem;
+  right: 0.9rem;
+  display: flex;
+  align-items: center;
+  font-size: 0.12rem;
+  color: #8b8378;
+
+  i {
+    font-style: normal;
+    margin-right: 0.04rem;
+  }
+
+  b {
+    font-weight: 400;
+    padding: 0.01rem 0.05rem;
+    margin-right: 0.02rem;
+    cursor: pointer;
+    border: 1px solid rgba(255, 255, 255, 0.14);
+    border-radius: 2px;
+    color: #a89e90;
+    transition: all 0.12s ease;
+  }
+
+  b:hover {
+    color: #ffe9b8;
+    border-color: rgba(232, 200, 116, 0.5);
+  }
+
+  b.on {
+    color: #1a1408;
+    background: linear-gradient(180deg, #ffe9b8, #d9b45f);
+    border-color: #ffd76a;
+  }
+}
+
+.tabbar.hide {
+  opacity: 0;
+  pointer-events: none;
 }
 </style>

@@ -1,6 +1,6 @@
 <template>
   <div class="equiment">
-    <div class="equimentPanel" v-if="JSON.stringify(equiment)!='{}'">
+    <div class="equimentPanel" v-if="equiment.type&&equiment.quality&&equiment.extraEntry&&JSON.stringify(equiment)!='{}'">
       <cTooltip placement="bottom">
         <template v-slot:content>
           <div class="panel-title">- 强化 i -</div>
@@ -16,10 +16,10 @@
 
       <div class="title">
 
-        <div class='icon' :class="{'red-flash':equiment.enchantlvl>=13}"  :style="{'box-shadow':'inset 0 0 7px 2px '+equiment.quality.color}">
-          <img :src="equiment.type.iconSrc" alt="">
+        <div class='icon' :class="{'red-flash':equiment.enchantlvl>=13}"  :style="{'box-shadow':'inset 0 0 7px 2px '+equimentColor}">
+          <img :src="equimentIcon" alt="">
         </div>
-        <div class='name' :style="{color:equiment.quality.color}">{{equiment.type.name}} {{equiment.enchantlvl?'(+'+equiment.enchantlvl+')':''}}</div>
+        <div class='name' :style="{color:equimentColor}">{{equimentName}} {{equiment.enchantlvl?'(+'+equiment.enchantlvl+')':''}}</div>
       </div>
       <div class="entry">
         <div class="old">
@@ -37,6 +37,12 @@
       <div class="btn-group" v-if='!autoStrengModel'>
         <p>需要金币：<span :class="{'red':userGold<strengthenNeedGold}">{{strengthenNeedGold}}</span></p>
         <div class="button" @click="startStreng()">强化至+{{parseInt(equiment.enchantlvl)+1}}</div>
+      </div>
+      <!-- ==== 新增：成功率明细（称号「锻造大师」等提供加成）==== -->
+      <div class="rate-line" v-if='!autoStrengModel'>
+        当前成功率 <b>{{(successRate*100).toFixed(0)}}%</b>
+        <i v-if="enchantBonus>0">（基础 {{(baseRate*100).toFixed(0)}}% + 加成 {{(enchantBonus*100).toFixed(0)}}%）</i>
+        <i v-else>（基础 {{(baseRate*100).toFixed(0)}}%）</i>
       </div>
       <div class="btn-group" v-if='!autoStrengModel'>
         <p>自动强化目标等级：</p>
@@ -68,6 +74,7 @@
             </div>
             <div v-if="v.recastStatus" class="recast-info"><span :class="{red:userGold<recastNeedGold}"></span>点击花费{{recastNeedGold}}金币重铸</div>
             <div v-else>{{v.name}} : {{v.showVal}} <span style="font-size:.12rem;margin-left:.06rem" v-if="v.EntryLevel"> ({{v.EntryLevel}})</span> </div>
+            <span class="entry-lock" :class="{on:v.entryLocked}" @click.stop="toggleEntryLock(v,k)">{{v.entryLocked?'已锁定':'锁定'}}</span>
           </button>
 
         </div>
@@ -80,6 +87,8 @@
 import { assist } from '../../assets/js/assist';
 import cTooltip from '../uiComponent/tooltip'
 import handle from '../../assets/js/handle'
+import { resolveIcon } from '@/assets/config/artMap'
+
 export default {
   components: { cTooltip },
   name: "equimentPanel",
@@ -130,6 +139,10 @@ export default {
     }, 1000)
   },
   computed: {
+    // 新增：防御式读取，避免面板在没有装备时渲染报错
+    equimentColor() { return (this.equiment.quality || {}).color || '#a1a1a1' },
+    equimentIcon() { return resolveIcon(this.equiment.type) || '' },
+    equimentName() { return (this.equiment.type || {}).name || '' },
 
     userGold() { return this.$store.state.playerAttribute.GOLD },
     item() { return this.$store.state.needStrengthenEquipment },
@@ -140,6 +153,20 @@ export default {
     recastNeedGold() {
       var a = parseInt(parseInt(this.equiment.lv) * this.equiment.quality.qualityCoefficient * (200 + 10 * parseInt(this.equiment.lv)) / 4)
       return a
+    },
+    // ==== 新增：强化成功率（含套装/称号/祭坛加成）====
+    baseRate() {
+      return this.rateOf(this.equiment.enchantlvl, false)
+    },
+    enchantBonus() {
+      return Math.min(0.35, Number(this.$store.state.playerAttribute.attribute.ENCHANT || 0) / 100)
+    },
+    successRate() {
+      return this.rateOf(this.equiment.enchantlvl, true)
+    },
+    luckReroll() {
+      var luck = Number(this.$store.state.playerAttribute.attribute.LUCK || 0)
+      return Math.min(3, Math.floor(luck / 40))
     }
   },
   watch: {
@@ -151,6 +178,30 @@ export default {
     }
   },
   methods: {
+    rateOf(lv, withBonus) {
+      var p
+      if (lv <= 5) {
+        p = 1
+      } else if (lv == 6) {
+        p = 0.8
+      } else if (lv == 7) {
+        p = 0.65
+      } else if (lv == 8) {
+        p = 0.45
+      } else if (lv == 9) {
+        p = 0.3
+      } else {
+        p = 0.2
+      }
+      if (withBonus && p < 1) {
+        p = Math.min(1, p + this.enchantBonus)
+      }
+      return p
+    },
+    toggleEntryLock(v, k) {
+      this.$set(v, 'entryLocked', !v.entryLocked)
+      this.$set(this.equiment.extraEntry, k, v)
+    },
     changeRecastStatus(v, k, status) {
       // 设置是否处于重置状态中
       this.qualityClass = ''
@@ -184,24 +235,23 @@ export default {
         return
       }
       let lv = this.equiment.enchantlvl
-      let probabilityOfSuccess = 1
-      if (lv <= 5) {
-        probabilityOfSuccess = 1
-      } else if (lv == 6) {
-        probabilityOfSuccess = 0.8
-      } else if (lv == 7) {
-        probabilityOfSuccess = 0.65
-      } else if (lv == 8) {
-        probabilityOfSuccess = 0.45
-      } else if (lv == 9) {
-        probabilityOfSuccess = 0.3
-      } else {
-        probabilityOfSuccess = 0.2
-      }
+      // 新增：统一走 rateOf，自动享受强化成功率加成
+      let probabilityOfSuccess = this.rateOf(lv, true)
       let r = Math.random()
       if (r < probabilityOfSuccess) {
         // 强化成功
         lv++
+        // 新增：记录最高强化等级（成就）
+        this.$store.commit('report', {
+          key: 'maxEnchant',
+          num: lv,
+          check: false
+        });
+        // 新增：强化成功次数（每日任务 / 成就）
+        this.$store.commit('report', {
+          key: 'enchantOk',
+          num: 1
+        });
       } else {
         // 强化失败
         if (lv >= 5) {
@@ -244,9 +294,31 @@ export default {
         });
         return
       }
+      // 新增：锁定的词条不参与重铸
+      if (this.equiment.extraEntry[k] && this.equiment.extraEntry[k].entryLocked) {
+        this.$store.commit("set_sys_info", {
+          msg: `这条词条已被锁定，先点「锁定」解锁后才能重铸。`,
+          type: 'warning'
+        });
+        return
+      }
       let newEntry = handle.createRandomEntry(this.equiment.lv, this.equiment.quality.qualityCoefficient)
+      // 新增：幸运带来的额外重roll，保留更好的一条
+      let reroll = this.luckReroll
+      while (reroll > 0) {
+        let tryEntry = handle.createRandomEntry(this.equiment.lv, this.equiment.quality.qualityCoefficient)
+        if (parseInt(tryEntry.EntryLevel) > parseInt(newEntry.EntryLevel)) {
+          newEntry = tryEntry
+        }
+        reroll--
+      }
       this.$set(this.equiment.extraEntry, k, newEntry);
       this.$store.commit("set_player_gold", -parseInt(this.recastNeedGold));
+      // 新增：重铸次数统计
+      this.$store.commit('report', {
+        key: 'recasts',
+        num: 1
+      });
       var a = parseInt(this.equiment.extraEntry[k].EntryLevel)
       if (a < 25) {
         this.qualityClass = 'D'
@@ -576,4 +648,28 @@ $blue: #ccc;
 .red {
   color: red;
 }
+/* ==== 新增：成功率与词条锁定 ==== */
+.rate-line {
+  font-size: .14rem;
+  color: #999;
+  margin: .04rem 0 .06rem .1rem;
+  b { color: #68d5ed; }
+  i { font-style: normal; color: #777; }
+}
+.extraEntry-item {
+  position: relative;
+}
+.entry-lock {
+  position: absolute;
+  right: .04rem;
+  top: .04rem;
+  font-size: .11rem;
+  color: #777;
+  border: 1px solid #555;
+  padding: 0 .04rem;
+  cursor: pointer;
+  z-index: 3;
+  &.on { color: #ffd76b; border-color: #ffd76b; }
+}
+
 </style>

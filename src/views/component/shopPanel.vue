@@ -4,7 +4,7 @@
       <div class="grid" v-for="(v, k) in grid" :key="k">
         <div class="title" v-if="v.lv" @contextmenu.prevent="openMenu(k, $event)" @mouseover="showItemInfo($event, v.itemType, v)" @mouseleave="closeItemInfo" @touchstart.stop.prevent="openMenu(k,$event)">
           <div class="icon" :style="{ 'box-shadow': 'inset 0 0 7px 2px ' + v.quality.color }">
-            <img :src="v.type.iconSrc" alt="" />
+            <img :src="iconOf(v)" alt="" />
           </div>
           <span class="info" :style="{'font-size':(parseInt(v.gold)>99999?0.18:0.22)+'rem'}">{{v.gold}}</span>
         </div>
@@ -29,6 +29,8 @@
 </template>
 <script>
 import { assist } from "../../assets/js/assist";
+import { resolveIcon } from '@/assets/config/artMap'
+
 export default {
   name: "shop",
   data() {
@@ -85,6 +87,9 @@ export default {
     this.refreshShopItems(true);
   },
   methods: {
+    iconOf(item) {
+      return resolveIcon((item || {}).type)
+    },
     /**
      * 刷新商店
      * constraint 是否跳过独特装备检测强制刷新

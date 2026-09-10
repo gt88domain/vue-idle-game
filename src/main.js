@@ -3,6 +3,7 @@ import App from './App.vue'
 import router from './router'
 import store from './store'
 import '@/assets/css/base.scss'
+import '@/assets/css/theme.scss'
 
 import {
   getAxiosInstance
