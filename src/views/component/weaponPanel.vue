@@ -3,9 +3,9 @@
     <!-- <div class="btn" style="position:relative;z-index:999;">
       <button @click="createNewWeapon">随机生成</button>
     </div> -->
-    <div class="weaponPanel" :style="{'box-shadow':' 0 0 5px 5px '+weapon.quality.color + 'b8'}" v-if="JSON.stringify(weapon)!='{}'">
+    <div class="weaponPanel" :style="{'box-shadow':' 0 0 5px 5px '+((weapon.quality||{}).color||'#a1a1a1')+'b8'}" v-if="JSON.stringify(weapon)!='{}'">
       <div class="title">
-        <div class='icon'  :class="{'red-flash':weapon.enchantlvl>=13,unique:weapon.quality.name=='独特'}" :style="{'box-shadow':'inset 0 0 7px 2px '+weapon.quality.color}">
+        <div class='icon'  :class="{'red-flash':weapon.enchantlvl>=13,unique:weapon.quality.name=='独特'}" :style="{'box-shadow':'inset 0 0 7px 2px '+((weapon.quality||{}).color||'#a1a1a1')}">
           <img :src="weapon.type.iconSrc" alt="">
         </div>
         <div class='name' :style="{color:weapon.quality.color}">{{weapon.type.name}} {{weapon.enchantlvl?'(+'+weapon.enchantlvl+')':''}}</div>
@@ -28,6 +28,12 @@
           <div>{{v.name}} : {{v.showVal}}</div>
         </div>
       </div>
+      <!-- ==== 新增：套装身份与装备评分 ==== -->
+      <div class="setInfo" v-if="weapon.setId" :style="{color:weapon.setColor,borderColor:weapon.setColor}">
+        <span>套装：{{weapon.setName}}</span>
+        <i class="setnum">已穿 {{setActiveNum(weapon.setId)}}/4</i>
+      </div>
+      <div class="score">装备评分：{{score(weapon)}}</div>
       <div class="des">
         <div>
           {{weapon.type.des}}
@@ -39,6 +45,8 @@
 </template>
 <script>
 import {equiAttributeWeapon} from '@/assets/config/equiAttributeWeapon'
+import { matchSetPiece, getSetById } from '@/assets/config/sets'
+import { scoreEquipment } from '@/assets/js/battle'
 export default {
   name: "weaponPanel",
   mixins: [equiAttributeWeapon],
@@ -59,25 +67,52 @@ export default {
     }
   },
   methods: {
-    createNewItem(qualityIndex, lv) {
+    // ==== 新增：评分与套装激活层数（给 tooltip 用） ====
+    score(item) {
+      return scoreEquipment(item)
+    },
+    setActiveNum(id) {
+      var d = this.$store.state.setDetail.filter(v => v.id == id)[0]
+      return d ? d.num : 0
+    },
+    setNameOf(id) {
+      var set = getSetById(id)
+      return set ? set.name : ''
+    },
+    createNewItem(qualityIndex, lv, forceTypeName) {
       var weapon = {}
       weapon.itemType = 'weapon'
       weapon.quality = qualityIndex > -1 ? this.quality[qualityIndex] : this.createQua()
       weapon.lv = lv || this.createLv()
-      weapon.type = this.createType(weapon)
+      weapon.type = this.createType(weapon, forceTypeName)
       weapon.extraEntry = this.createExtraEntry(weapon)
+      // 新增：标记套装部件（部件身份来自装备底材本身，困难/极难副本会定向掉落套装底材）
+      var setPiece = matchSetPiece('weapon', weapon.type.name)
+      if (setPiece) {
+        weapon.setId = setPiece.id
+        weapon.setName = setPiece.name
+        weapon.setColor = setPiece.color
+      }
       return JSON.stringify(weapon)
     },
     createLv(Max) {
       return parseInt(Math.random() * (Max || 39)) + 1
     },
-    createType(weapon) {
+    createType(weapon, forceTypeName) {
       if (weapon.quality.name == '独特') {
         var index = Math.floor((Math.random() * this.uniqueCategory.length));
         var type = this.uniqueCategory[index], lv = weapon.lv
       } else {
         var index = Math.floor((Math.random() * this.category.length));
         var type = this.category[index], lv = weapon.lv
+      }
+      // 新增：定向生成指定底材（套装掉落用）
+      if (forceTypeName) {
+        var list = weapon.quality.name == '独特' ? this.uniqueCategory : this.category
+        var found = list.filter(t => t.name == forceTypeName)[0]
+        if (found) {
+          type = found
+        }
       }
 
       type.entry.map(item => {
@@ -306,5 +341,23 @@ export default {
   button {
     padding: 0.06rem 0.12rem;
   }
+}
+/* ==== 新增：套装与评分 ==== */
+.setInfo {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border: 1px solid;
+  padding: 0 0.06rem;
+  margin-top: 0.06rem;
+  font-size: 0.13rem;
+  .setnum {
+    opacity: 0.8;
+  }
+}
+.score {
+  font-size: 0.13rem;
+  color: #68d5ed;
+  margin-top: 0.04rem;
 }
 </style>

@@ -14,6 +14,7 @@
 </template>
 <script>
 import { assist } from '../../assets/js/assist';
+import { rollSetPiece } from '../../assets/config/sets';
 export default {
   name: "dungeons",
   mixins: [assist],
@@ -103,6 +104,15 @@ export default {
   },
   computed: {
     reincarnationAttribute() { return this.$store.state.reincarnationAttribute },
+    // 新增：祭坛「疾行符文」带来的推进/战斗加速（最多 -60%）
+    speedK() {
+      var sp = Number(this.$store.state.bonus.SPEED || 0)
+      return Math.max(0.4, 1 - sp / 100)
+    },
+    goldMul() {
+      // 新增：金币获取加成（套装「贪婪之旅」/祭坛「贪婪回响」/称号）
+      return 1 + Number(this.$store.state.playerAttribute.attribute.GOLDGAIN || 0) / 100
+    },
   },
   mounted() {
     // this.evenHandle()
@@ -118,12 +128,12 @@ export default {
             this.timeOut = setTimeout(() => {
               this.pro = setInterval(() => {
                 startEnent()
-              }, this.moveTime+this.reincarnationAttribute.MOVESPEED)
-            }, this.battleTime+this.reincarnationAttribute.BATTLESPEED)
+              }, Math.max(8, (this.moveTime + this.reincarnationAttribute.MOVESPEED) * this.speedK))
+            }, Math.max(60, (this.battleTime + this.reincarnationAttribute.BATTLESPEED) * this.speedK))
           } else {
             setTimeout(() => {
               this.eventEnd()
-            }, this.battleTime+this.reincarnationAttribute.BATTLESPEED)
+            }, Math.max(60, (this.battleTime + this.reincarnationAttribute.BATTLESPEED) * this.speedK))
           }
 
           clearInterval(this.pro)
@@ -134,7 +144,7 @@ export default {
       this.eventBegin()
       this.pro = setInterval(() => {
         startEnent()
-      }, this.moveTime+this.reincarnationAttribute.MOVESPEED)
+      }, Math.max(8, (this.moveTime + this.reincarnationAttribute.MOVESPEED) * this.speedK))
     },
     eventBegin() {
       this.$store.commit("set_sys_info", {
@@ -164,7 +174,7 @@ export default {
           });
           this.battleComTime = setTimeout(() => {
             this.battleCom(event)
-          }, this.battleTime+this.reincarnationAttribute.BATTLESPEED)
+          }, Math.max(60, (this.battleTime + this.reincarnationAttribute.BATTLESPEED) * this.speedK))
           break;
 
         default:
@@ -201,6 +211,11 @@ export default {
               `,
             type: "win",
           });
+          // 新增：通关次数统计（成就）
+          this.$store.commit('report', {
+            key: 'dungeons',
+            num: 1
+          });
         }
 
         let p = this.findComponentUpward(this, 'index')
@@ -227,8 +242,22 @@ export default {
         }
         this.forcedToStopEvent()
         let backpackPanelSign = backpackPanel.itemNum / backpackPanel.grid.length < 0.8
+        // ==== 新增：自动挂机征战（刷本到死或背包满为止）====
+        var autoFarmOn = this.$store.state.settings.autoFarm
+        var autoFarmGo = autoFarmOn && (p.dungeons.difficulty == 1 || p.dungeons.type == 'endless')
         if (p.reChallenge && backpackPanelSign) {
           p.eventBegin()
+        } else if (autoFarmGo && p.dungeons.type == 'endless') {
+          // 无尽：自动推进到下一层
+          p.endlessLv = this.$store.state.playerAttribute.endlessLv
+          p.dungeons.lv = this.$store.state.playerAttribute.endlessLv
+          p.showEndlessDungeonsInfo()
+          p.eventBegin()
+        } else if (autoFarmGo && backpackPanelSign) {
+          // 普通副本：原地重复挑战
+          setTimeout(() => {
+            p.eventBegin()
+          }, 400)
         } else if (p.reEChallenge&&p.dungeons.type=='endless') {
           this.$store.commit("set_endless_lv", this.$store.state.playerAttribute.endlessLv - 1);
           p.eventBegin()
@@ -238,6 +267,15 @@ export default {
           p.showEndlessDungeonsInfo()
           p.eventBegin()
         } else {
+          if (autoFarmOn && !backpackPanelSign) {
+            this.$store.commit('set_settings', {
+              autoFarm: false
+            })
+            this.$store.commit("set_sys_info", {
+              msg: `背包快满了，自动挂机已停止。`,
+              type: 'warning'
+            });
+          }
           p.dungeons = ''
           p.inDungeons = false
         }
@@ -261,8 +299,13 @@ export default {
         monsterAttribute = this.$deepCopy(event.attribute), //HP: 100,ATK: 1,
         p = this.findComponentUpward(this, 'index')
 
+      // ==== 新增：反伤与穿透并入竞速解算（闪避/固定减伤已在 REDUCDMG 内折算）====
+      var thornsDps = Number(playerAttribute.THORNS || 0) / 100 * Number(monsterAttribute.ATK)
+      var penetrateK = 1 + Number(playerAttribute.PENETRATE || 0) / 100
+      var realPlayerDps = playerDPS * penetrateK + thornsDps
+
       var playerDeadTime = (playerAttribute.CURHP.value+playerBLOC) / reducedDamage / monsterAttribute.ATK,
-        monsterDeadTime = (monsterAttribute.HP / playerDPS)
+        monsterDeadTime = (monsterAttribute.HP / realPlayerDps)
 
       // 战斗获胜
       if (monsterDeadTime < playerDeadTime) {
@@ -272,6 +315,32 @@ export default {
         takeDmg = takeDmg + playerBLOC
         takeDmg = takeDmg>-1?-1:takeDmg
         this.$store.commit('set_player_curhp', takeDmg)
+
+        // 新增：击杀统计（成就系统）
+        this.$store.commit('report', {
+          key: 'kills',
+          num: 1
+        })
+        if (event.type == 'boss') {
+          this.$store.commit('report', {
+            key: 'bossKills',
+            num: 1,
+            check: false
+          })
+        }
+
+        // ==== 新增：吸血回复（按本场造成的伤害比例）====
+        var stealPct = Number(playerAttribute.LIFESTEAL || 0)
+        if (stealPct > 0) {
+          var steal = Math.floor(Math.abs(takeDmg) * stealPct / 100)
+          if (steal > 0) {
+            this.$store.commit('set_player_curhp', steal)
+            this.$store.commit("set_sys_info", {
+              msg: `吸血效果回复了${steal}点生命`,
+              type: 'win'
+            });
+          }
+        }
 
         if (this.dungeons.type == 'endless') {
           this.$store.commit("set_sys_info", {
@@ -306,6 +375,20 @@ export default {
         }
       } else {
         // 玩家死亡
+        this.$store.commit('report', {
+          key: 'deaths',
+          num: 1
+        });
+        // 新增：死亡时中断自动挂机
+        if (this.$store.state.settings.autoFarm) {
+          this.$store.commit('set_settings', {
+            autoFarm: false
+          })
+          this.$store.commit("set_sys_info", {
+            msg: `挑战失败，自动挂机已停止。`,
+            type: 'warning'
+          });
+        }
         this.$store.commit('set_player_curhp', 'dead')
         clearInterval(this.pro)
         clearTimeout(this.timeOut)
@@ -339,9 +422,12 @@ export default {
     caculateTrophy(event) {
       var items = []
       var lv = this.dungeons.lv
+      var playerAttr = this.$store.state.playerAttribute.attribute
+      // 新增：幸运提高独特装备掉率（祭坛「命运馈赠」/称号/贪婪4件套）
+      var luckK = 1 + Math.min(200, Number(playerAttr.LUCK || 0)) / 100
       // 获取独特装备
       if (event.type == 'boss' && this.dungeons.type != 'endless') {
-        var randow = 1 - 0.02*((this.dungeons.difficulty-1)*2+1)
+        var randow = 1 - 0.02*((this.dungeons.difficulty-1)*2+1) * luckK
         if (Math.random() > randow) {
           var random = Math.random()
           if (random <= 0.3 && random > 0) {
@@ -361,6 +447,11 @@ export default {
             var item = b.createNewItem(4, parseInt(lv + Math.random() * 6))
             items.push(JSON.parse(item))
           }
+          // 新增：独特装备统计
+          this.$store.commit('report', {
+            key: 'uniqueDrops',
+            num: 1
+          });
 
         }
       }
@@ -392,20 +483,50 @@ export default {
       if (equipQua != -1) {
         // this.createEquip(equipQua,lv)
         var index = Math.floor((Math.random() * 4));
+        var slotName = ['weapon', 'armor', 'ring', 'neck'][index]
+        // ==== 新增：困难/极难副本有几率定向掉出套装底材（补完原版预告的套装玩法）====
+        var forceTypeName = null
+        if (this.dungeons.difficulty > 1 && this.dungeons.type != 'endless') {
+          var setChance = (this.dungeons.difficulty == 2 ? 0.3 : 0.45) * (1 + Math.min(100, Number(playerAttr.LUCK || 0)) / 200)
+          if (Math.random() < setChance) {
+            var rolled = rollSetPiece(slotName, equipQua == 4)
+            if (rolled) {
+              forceTypeName = rolled.typeName
+            }
+          }
+        }
         if (index == 0) {
           var b = this.findBrothersComponents(this, 'weaponPanel', false)[0]
-          var item = b.createNewItem(equipQua, lv)
+          var item = b.createNewItem(equipQua, lv, forceTypeName)
         } else if (index == 1) {
           var b = this.findBrothersComponents(this, 'armorPanel', false)[0]
-          var item = b.createNewItem(equipQua, lv)
+          var item = b.createNewItem(equipQua, lv, forceTypeName)
         }else if (index == 2) {
           var b = this.findBrothersComponents(this, 'ringPanel', false)[0]
-          var item = b.createNewItem(equipQua, lv)
+          var item = b.createNewItem(equipQua, lv, forceTypeName)
         } else {
           var b = this.findBrothersComponents(this, 'neckPanel', false)[0]
-          var item = b.createNewItem(equipQua, lv)
+          var item = b.createNewItem(equipQua, lv, forceTypeName)
         }
         items.push(JSON.parse(item))
+        // 新增：掉落统计
+        if (equipQua == 3) {
+          this.$store.commit('report', {
+            key: 'epicDrops',
+            num: 1,
+            check: false
+          });
+        }
+        if (items[items.length - 1].setId) {
+          this.$store.commit('report', {
+            key: 'setDrops',
+            num: 1
+          });
+          this.$store.commit("set_sys_info", {
+            msg: `套装掉落：${items[items.length - 1].setName}·${items[items.length - 1].type.name}`,
+            type: 'trophy'
+          });
+        }
         var backpackPanel = this.findBrothersComponents(this, 'backpackPanel', false)[0]
         var goldObtainRatio = 1
         if (this.dungeons.type == 'endless') {
@@ -420,18 +541,26 @@ export default {
           type: 'trophy',
           equip: items
         });
-        this.$store.commit("set_player_gold", parseInt(event.trophy.gold * goldObtainRatio));
+        // 新增：金币获取加成
+        var goldGot = parseInt(event.trophy.gold * goldObtainRatio * this.goldMul)
+        this.$store.commit("set_player_gold", goldGot);
+        this.$store.commit('report', {
+          key: 'goldEarned',
+          num: goldGot,
+          check: false
+        });
         if(this.dungeons.type == 'endless'){
           return
         }
         items.map(item => {
           // 当开启了自动出售并且新获得的装备品质低于史诗时，自动出售
-          if (backpackPanel.autoSell[equipQua]&&item.quality.name!="独特") {
+          var keepSet = this.$store.state.settings.autoKeepSet
+          if (backpackPanel.autoSell[equipQua]&&item.quality.name!="独特"&&!(keepSet&&item.setId)) {
             var gold = item.lv * item.quality.qualityCoefficient * 30
-            this.$store.commit("set_player_gold", parseInt(gold));
+            this.$store.commit("set_player_gold", parseInt(gold * this.goldMul));
             this.$store.commit("set_sys_info", {
               msg: `
-                自动出售装备获得金币：${parseInt(gold)}
+                自动出售装备获得金币：${parseInt(gold * this.goldMul)}
               `,
               type: 'trophy',
             });
@@ -458,7 +587,12 @@ export default {
           type: 'trophy',
           equip: []
         });
-        this.$store.commit("set_player_gold", parseInt(event.trophy.gold * goldObtainRatio));
+        var goldGot = parseInt(event.trophy.gold * goldObtainRatio * this.goldMul)
+        this.$store.commit("set_player_gold", goldGot);
+        this.$store.commit('report', {
+          key: 'goldEarned',
+          num: goldGot
+        });
       }
 
     }

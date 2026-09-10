@@ -2,7 +2,64 @@ import Vue from 'vue'
 import Vuex from 'vuex'
 import vueInstance from './main'
 import handle from './assets/js/handle'
+import {
+  aggregateSetBonus
+} from './assets/config/sets'
+import {
+  ABYSS_PERKS,
+  aggregatePerks
+} from './assets/config/abyss'
+import {
+  ACHIEVEMENTS,
+  TITLES,
+  ACHIEVEMENT_ECHO
+} from './assets/config/achievements'
 Vue.use(Vuex)
+
+/** 加成池：装备百分比、套装、称号、深渊祭坛都汇入这里 */
+const BONUS_KEYS = ['ATKPERCENT', 'DEFPERCENT', 'HPPERCENT', 'BLOCPERCENT', 'CRIT', 'CRITDMG',
+  'THORNS', 'LIFESTEAL', 'EVA', 'DR', 'PENETRATE', 'EXECUTE', 'REVIVE', 'WRATH',
+  'GOLDGAIN', 'REGEN', 'LUCK', 'ENCHANT', 'SPEED', 'EXTRA_PICK', 'DEATH_KEEP', 'OFFLINE_CAP'
+]
+
+function mergeBonus(target, src) {
+  if (!src) {
+    return target
+  }
+  Object.keys(src).forEach(k => {
+    if (!isNaN(Number(src[k]))) {
+      target[k] = (target[k] || 0) + Number(src[k])
+    }
+  })
+  return target
+}
+
+export const initial_abyss = {
+  echoes: 0,
+  totalEchoes: 0,
+  runs: 0,
+  bestFloor: 0,
+  wins: 0,
+  perks: {},
+  // 单局状态（不落盘，刷新即结束，避免刷存档卡祝福）
+  run: null
+}
+
+export const initial_stats = {
+  kills: 0,
+  bossKills: 0,
+  dungeons: 0,
+  deaths: 0,
+  goldEarned: 0,
+  uniqueDrops: 0,
+  epicDrops: 0,
+  maxEnchant: 0,
+  recasts: 0,
+  setDrops: 0,
+  offlineCount: 0,
+  abyssFloors: 0,
+  playTime: 0
+}
 
 var initial_weapon = {
     "lv": 1,
@@ -123,6 +180,19 @@ var initial_weapon = {
 
 export default new Vuex.Store({
   state: {
+    bonus: {}, //套装 + 称号 + 深渊祭坛的聚合加成
+    setDetail: [], //套装激活明细（UI 用）
+    title: '', //当前佩戴的称号 id
+    unlockedAchievements: {}, //已解锁成就
+    abyss: JSON.parse(JSON.stringify(initial_abyss)), //深渊回廊
+    stats: JSON.parse(JSON.stringify(initial_stats)), //统计数据
+    settings: {
+      autoFarm: false, //自动征战（挂机刷本）
+      offlineGain: true, //离线收益
+      autoKeepSet: true, //自动出售时保护套装部件
+      compactSys: false
+    },
+    lastSaveTime: 0,
     needStrengthenEquipment: {}, //设定当前需要强化的装备
     sysInfo: [{
       type: '',
@@ -220,6 +290,15 @@ export default new Vuex.Store({
     },
     set_player_attribute(state, data) {
       var p = state.playerAttribute
+      // ==== 新增：聚合套装 / 称号 / 深渊祭坛加成（全部为 0 时与原版完全一致）====
+      const equipped = [p.weapon, p.armor, p.ring, p.neck].filter(v => v && JSON.stringify(v) != '{}')
+      const setAgg = aggregateSetBonus(equipped)
+      const bonus = {}
+      mergeBonus(bonus, setAgg.bonus)
+      mergeBonus(bonus, TITLES[state.title] ? TITLES[state.title].mods : null)
+      mergeBonus(bonus, aggregatePerks(state.abyss.perks))
+      state.bonus = bonus
+      state.setDetail = setAgg.detail
       var warpon = p.weapon,
         armor = p.armor,
         ring = p.ring,
@@ -337,6 +416,11 @@ export default new Vuex.Store({
             break;
         }
       })
+      // ==== 新增：套装/称号/祭坛的百分比并入同一套池子（沿用原版「先加总再乘算」的规则）====
+      ATKPERCENT += Number(bonus.ATKPERCENT || 0)
+      DEFPERCENT += Number(bonus.DEFPERCENT || 0)
+      HPPERCENT += Number(bonus.HPPERCENT || 0)
+      BLOCPERCENT += Number(bonus.BLOCPERCENT || 0)
       attribute.ATK.value = parseInt(attribute.ATK.value * (100 + ATKPERCENT) / 100)
       attribute.ATK.showValue = '+' + (attribute.ATK.value)
       attribute.DEF.value = parseInt(attribute.DEF.value * (100 + DEFPERCENT) / 100)
@@ -358,9 +442,15 @@ export default new Vuex.Store({
         attribute.CURHP = vueInstance.$deepCopy(attribute.MAXHP)
       }
 
+      // ==== 新增：暴击/爆伤附加（套装、祝福称号等）====
+      attribute.CRIT.value += Number(bonus.CRIT || 0)
+      attribute.CRIT.showValue = '+' + attribute.CRIT.value + '%'
       // 初始暴击伤害150%
-      attribute.CRITDMG.value += 150
+      attribute.CRITDMG.value += 150 + Number(bonus.CRITDMG || 0)
+      attribute.CRITDMG.showValue = '+' + attribute.CRITDMG.value + '%'
 
+      // 回血速度加成（原版固定 2%/s，这里按 REGEN% 放大）
+      state.playerAttribute.healthRecoverySpeed = 1 + Number(bonus.REGEN || 0) / 100
       var atk = attribute.ATK.value,
         crit = attribute.CRIT.value,
         critdmg = attribute.CRITDMG.value
@@ -374,6 +464,28 @@ export default new Vuex.Store({
       //承受伤害比例
       // attribute.REDUCDMG = 1 - 0.06 * armor / (1 + (0.06 * armor))
       attribute.REDUCDMG = 1 - 0.05 * armor / (1 + (0.0525 * armor))
+
+      // ==== 新增：闪避 + 固定减伤 参与承伤计算（非线性，收益递减）====
+      const evaTotal = Math.min(75, Number(attribute.EVA.value || 0) + Number(bonus.EVA || 0))
+      attribute.EVA.value = evaTotal.toFixed(1)
+      attribute.EVA.showValue = evaTotal.toFixed(1) + '%'
+      attribute.EVA.bonus = Number(bonus.EVA || 0)
+      const drTotal = Math.min(70, Number(bonus.DR || 0))
+      attribute.DR = drTotal
+      if (evaTotal > 0 || drTotal > 0) {
+        attribute.REDUCDMG = attribute.REDUCDMG * (1 - 0.6 * evaTotal / (evaTotal + 45)) * (1 - drTotal / 100)
+      }
+      // 新属性透出给战斗解算使用
+      attribute.THORNS = Number(bonus.THORNS || 0)
+      attribute.LIFESTEAL = Number(bonus.LIFESTEAL || 0)
+      attribute.PENETRATE = Number(bonus.PENETRATE || 0)
+      attribute.WRATH = Number(bonus.WRATH || 0)
+      attribute.GOLDGAIN = Number(bonus.GOLDGAIN || 0)
+      attribute.LUCK = Number(bonus.LUCK || 0)
+      attribute.ENCHANT = Number(bonus.ENCHANT || 0)
+      attribute.SPEED = Number(bonus.SPEED || 0)
+      // DPS 计入反伤/穿透期望（反伤按怪物攻击力换算，战斗中再精确处理）
+      attribute.DPSBASE = attribute.DPS
 
       // state.playerAttribute.attribute=attribute
       // vueInstance.$store.commit("set_player_attribute", attribute);
@@ -416,6 +528,109 @@ export default new Vuex.Store({
     },
     set_need_strengthen_equipment(state, data) {
       this.state.needStrengthenEquipment = data;
+    },
+    // ===================== 新增玩法相关 mutations =====================
+    // 佩戴/卸下称号
+    set_title(state, data) {
+      state.title = data || ''
+      this.commit('set_player_attribute')
+    },
+    // 深渊：通用写入
+    set_abyss(state, data) {
+      Object.assign(state.abyss, data || {})
+      this.commit('set_player_attribute')
+    },
+    buy_abyss_perk(state, perkId) {
+      const perk = ABYSS_PERKS.find(v => v.id === perkId)
+      if (!perk) {
+        return
+      }
+      const lv = state.abyss.perks[perkId] || 0
+      if (lv >= perk.max) {
+        return
+      }
+      const cost = Math.floor(perk.baseCost * Math.pow(perk.costK, lv))
+      if (state.abyss.echoes < cost) {
+        return
+      }
+      state.abyss.echoes -= cost
+      this.state.abyss.perks = Object.assign({}, state.abyss.perks, {
+        [perkId]: lv + 1
+      })
+      this.commit('set_player_attribute')
+      this.commit('set_sys_info', {
+        msg: `祭坛回应了你：「${perk.name}」提升到 ${lv + 1} 级。`,
+        type: 'win'
+      })
+    },
+    add_echoes(state, num) {
+      num = parseInt(num) || 0
+      state.abyss.echoes += num
+      if (num > 0) {
+        state.abyss.totalEchoes += num
+      }
+    },
+    // 统计与成就：所有玩法事件都通过 report 上报
+    report(state, data) {
+      const {
+        key,
+        num = 1,
+        check = true
+      } = data || {}
+      if (key && state.stats.hasOwnProperty(key)) {
+        if (key == 'maxEnchant' || key == 'playTime') {
+          state.stats[key] = Math.max(state.stats[key], Number(num))
+        } else {
+          state.stats[key] = state.stats[key] + Number(num)
+        }
+      }
+      check && this.commit('check_achievements')
+    },
+    check_achievements(state, force) {
+      const snapshot = {
+        stats: state.stats,
+        attribute: state.playerAttribute.attribute,
+        playerAttribute: state.playerAttribute,
+        reincarnation: state.reincarnation,
+        abyss: state.abyss,
+        setDetail: state.setDetail
+      }
+      const newly = []
+      ACHIEVEMENTS.forEach(item => {
+        if (state.unlockedAchievements[item.id]) {
+          return
+        }
+        let cur = 0
+        try {
+          cur = Number(item.metric(snapshot)) || 0
+        } catch (e) {
+          cur = 0
+        }
+        if (cur >= item.goal) {
+          state.unlockedAchievements = Object.assign({}, state.unlockedAchievements, {
+            [item.id]: Date.now()
+          })
+          newly.push(item)
+        }
+      })
+      if (!newly.length) {
+        return
+      }
+      newly.forEach(item => {
+        this.commit('add_echoes', ACHIEVEMENT_ECHO)
+        this.commit('set_sys_info', {
+          msg: `达成成就「${item.name}」，获得 ${ACHIEVEMENT_ECHO} 回响${item.title ? '，并解锁称号「' + TITLES[item.title].name + '」' : ''}`,
+          type: 'win'
+        })
+      })
+      return newly
+    },
+    // 设置开关
+    set_settings(state, data) {
+      state.settings = Object.assign({}, state.settings, data || {})
+    },
+    set_last_save_time(state, data) {
+      state.lastSaveTime = Number(data) || 0
     },
     set_player_curhp(state, data) {
       var CURHP = this.state.playerAttribute.attribute.CURHP,
