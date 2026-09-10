@@ -34,7 +34,7 @@ npm run fidelity   # 复刻保真度校验，见下
 
 ### 保真度校验 `npm run fidelity`
 
-"复刻"不该靠嘴说。`tools/fidelity-check.js` 会用 `git show HEAD:<file>` 取出**上游原始实现**，和当前工作区的实现在**同一颗种子随机数**下跑同样的流程并逐字段对比（用 `mulberry32` 锁死 `Math.random`）：
+"复刻"不该靠嘴说。`tools/fidelity-check.js` 会以**上游原版提交为基准**（自动取 `git merge-base HEAD master`，可用 `FIDELITY_BASE=<rev>` 覆盖；不是拿 HEAD 自己和自己比）取出原始实现，和当前工作区的实现在**同一颗种子随机数**下跑同样的流程并逐字段对比（用 `mulberry32` 锁死 `Math.random`）：
 
 ```
 [1] 装备生成器（4 部位 × 5 品质 × 5 等级）        ✓ 200 组 0 差异

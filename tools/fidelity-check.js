@@ -17,6 +17,27 @@ const fs = require('fs')
 const path = require('path')
 
 const ROOT = path.resolve(__dirname, '..')
+
+/**
+ * 对比基准：上游原版提交（而不是 HEAD，否则改完代码就变成"自己和自己比"了）
+ * 优先级：环境变量 FIDELITY_BASE > 与 master 的 merge-base > master > HEAD
+ */
+function resolveBase() {
+  const tries = [
+    process.env.FIDELITY_BASE,
+    execSync('git merge-base HEAD master', { cwd: ROOT }).toString().trim(),
+    'master'
+  ]
+  for (const t of tries) {
+    if (!t) continue
+    try {
+      execSync(`git cat-file -e ${t}:src/store.js`, { cwd: ROOT })
+      return t
+    } catch (e) { /* try next */ }
+  }
+  return 'HEAD'
+}
+const BASE = resolveBase()
 const compiler = require(path.join(ROOT, 'node_modules/vue-template-compiler'))
 
 /** 可复现随机数（mulberry32） */
@@ -34,6 +55,7 @@ function rng(seed) {
 function ref(rev, file) {
   return execSync(`git show ${rev}:${file}`, { cwd: ROOT, maxBuffer: 1 << 26 }).toString('utf8')
 }
+const UPSTREAM = BASE
 function cur(file) {
   return fs.readFileSync(path.join(ROOT, file), 'utf8')
 }
@@ -88,6 +110,7 @@ function check(name, pass, detail) {
 }
 
 // ---------------------------------------------------------------- 1) 装备生成
+console.log(`对比基准：${BASE.split('\n')[0].slice(0,12)}（上游原版）`)
 console.log('\n[1] 装备生成器（4 部位 × 5 品质 × 多种等级）')
 const SLOTS = ['weapon', 'armor', 'ring', 'neck']
 const PANEL = {
@@ -134,12 +157,12 @@ const STUBS = {
 let genMismatch = 0
 let genRuns = 0
 SLOTS.forEach(slot => {
-  const cfgOrig = evalConfig(ref('HEAD', CFG[slot]))
+  const cfgOrig = evalConfig(ref(UPSTREAM, CFG[slot]))
   const cfgCur = evalConfig(cur(CFG[slot]))
   for (let round = 0; round < 2; round++) {
     const seed = 1000 + round * 7 + slot.length
     Math.random = rng(seed)
-    const a = makePanel(ref('HEAD', PANEL[slot]), cfgOrig)
+    const a = makePanel(ref(UPSTREAM, PANEL[slot]), cfgOrig)
     Math.random = rng(seed)
     const b = makePanel(cur(PANEL[slot]), cfgCur, STUBS)
     for (let q = 0; q <= 4; q++) {
@@ -254,14 +277,14 @@ let attrRuns = 0
 for (let t = 0; t < 60; t++) {
   const seed = 5000 + t
   const panels = {}
-  SLOTS.forEach(s => { panels[s] = makePanel(ref('HEAD', PANEL[s]), evalConfig(ref('HEAD', CFG[s])), STUBS) })
+  SLOTS.forEach(s => { panels[s] = makePanel(ref(UPSTREAM, PANEL[s]), evalConfig(ref(UPSTREAM, CFG[s])), STUBS) })
   Math.random = rng(seed)
   const items = SLOTS.map(s => {
     const q = Math.floor(Math.random() * 4)
     const lv = 1 + Math.floor(Math.random() * 120)
     return JSON.parse(panels[s].createNewItem(q, lv))
   })
-  const A = runMutation(ref('HEAD', 'src/store.js'), items.map(i => JSON.parse(JSON.stringify(i))))
+  const A = runMutation(ref(UPSTREAM, 'src/store.js'), items.map(i => JSON.parse(JSON.stringify(i))))
   const B = runMutation(cur('src/store.js'), items.map(i => JSON.parse(JSON.stringify(i))))
   const pick = st => {
     const a = st.playerAttribute.attribute
@@ -286,7 +309,7 @@ const untouched = ['src/assets/js/handle.js', 'src/assets/config/equiAttributeWe
 untouched.forEach(f => {
   let same = true
   try {
-    const d = execSync(`git diff --stat HEAD -- ${f}`, { cwd: ROOT }).toString().trim()
+    const d = execSync(`git diff --stat ${BASE} -- ${f}`, { cwd: ROOT }).toString().trim()
     same = d === ''
   } catch (e) { same = false }
   check(`${f} 与原版一致`, same, same ? '' : '已被修改')
