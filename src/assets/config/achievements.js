@@ -126,6 +126,16 @@ export const TITLES = {
       LUCK: 5
     }
   },
+  loyal: {
+    id: 'loyal',
+    name: '全勤勇者',
+    des: '每天都来的人，运气不会太差。',
+    mods: {
+      LUCK: 6,
+      GOLDGAIN: 8,
+      OFFLINE_CAP: 2
+    }
+  },
   grandmaster: {
     id: 'grandmaster',
     name: '一代宗师',
@@ -314,6 +324,42 @@ export const ACHIEVEMENTS = [{
     goal: 4,
     metric: s => Math.max(0, ...Object.keys(s.heroes.owned || {}).map(k => s.heroes.owned[k].star || 0)),
     title: null
+  },
+  {
+    id: 'firstChapter',
+    name: '第一章',
+    des: '通关任意 5 个章节关卡',
+    icon: './icons/menu/d1.png',
+    goal: 5,
+    metric: s => s.campaign.clears,
+    title: 'vanguard'
+  },
+  {
+    id: 'starCollector',
+    name: '追星者',
+    des: '章节累计获得 30 颗星',
+    icon: './icons/menu/d2.png',
+    goal: 30,
+    metric: s => Object.keys(s.campaign.stars || {}).reduce((a, k) => a + (s.campaign.stars[k] || 0), 0),
+    title: 'muster'
+  },
+  {
+    id: 'sweepKing',
+    name: '扫荡机器',
+    des: '累计扫荡 50 次',
+    icon: './icons/menu/refresh_de.png',
+    goal: 50,
+    metric: s => s.stats.sweeps,
+    title: null
+  },
+  {
+    id: 'punctual',
+    name: '风雨无阻',
+    des: '连续签到 7 天',
+    icon: './icons/menu/icon_save.png',
+    goal: 7,
+    metric: s => s.daily.signStreak,
+    title: 'loyal'
   },
   {
     id: 'survivor',

@@ -475,6 +475,8 @@
     <abyssPanel ref="abyss"></abyssPanel>
     <achievementsPanel ref="achv"></achievementsPanel>
     <heroPanel ref="hero"></heroPanel>
+    <campaignPanel ref="camp"></campaignPanel>
+    <dailyPanel ref="daily"></dailyPanel>
 
     <!-- 新增：手游式底部页签，一级功能常驻 -->
     <div class="tabbar" :class="{hide: showTitle}">
@@ -513,6 +515,8 @@ import { TITLES } from '../assets/config/achievements'
 import { SETS, getSetByName } from '../assets/config/sets'
 import TitleScreen from './titleScreen'
 import heroPanel from './component/heroPanel'
+import campaignPanel from './component/campaignPanel'
+import dailyPanel from './component/dailyPanel'
 import sfx, { sfxForSysInfo } from '../assets/js/sfx'
 import { resolveIcon } from '../assets/config/artMap'
 export default {
@@ -562,7 +566,7 @@ export default {
       debounceTime: {},  //防抖计时器
     };
   },
-  components: { weaponPanel, armorPanel, ringPanel, neckPanel, dungeons, backpackPanel, shopPanel, cTooltip, strengthenEquipment, extras, qa, setting, reinPanel, abyssPanel, achievementsPanel, TitleScreen, heroPanel },
+  components: { weaponPanel, armorPanel, ringPanel, neckPanel, dungeons, backpackPanel, shopPanel, cTooltip, strengthenEquipment, extras, qa, setting, reinPanel, abyssPanel, achievementsPanel, TitleScreen, heroPanel, campaignPanel, dailyPanel },
   created() {
     this._sessionStart = Date.now()
     // 窗口自适应
@@ -584,7 +588,24 @@ export default {
     });
 
   },
+  beforeDestroy() {
+    // 新增：清掉本 fork 引入的计时器（原版的 autoHealthRecovery 保持原样）
+    if (this.dailyRollTimer) {
+      clearInterval(this.dailyRollTimer)
+      this.dailyRollTimer = null
+    }
+    if (this.campTickTimer) {
+      clearInterval(this.campTickTimer)
+      this.campTickTimer = null
+    }
+  },
   mounted() {
+    // 新增：每日任务/签到按日期滚动（跨零点自动换一批，60 秒检查一次足够）
+    this.$store.commit('daily_rollover')
+    this.dailyRollTimer = setInterval(() => {
+      this.$store.commit('daily_rollover')
+    }, 60 * 1000)
+
     // 自动回血
     this.autoHealthRecovery = setInterval(() => {
       this.$store.commit('set_player_curhp', this.healthRecoverySpeed * (this.attribute.MAXHP.value / 50))
@@ -652,9 +673,34 @@ export default {
     heroes() {
       return this.$store.state.heroes || {}
     },
+    campBadge() {
+      const st = this.$store.state.stats || {}
+      const n = Number(st.stageStars || 0)
+      return n ? n + '★' : ''
+    },
+    dailyBadge() {
+      const d = this.$store.state.daily || {}
+      const stats = this.$store.state.stats
+      let n = 0
+      ;(d.quests || []).forEach(q => {
+        if (!q.claimed && Number(stats[q.key] || 0) - Number(q.base || 0) >= q.goal) {
+          n++
+        }
+      })
+      const day = new Date()
+      const key = day.getFullYear() + '-' + ('0' + (day.getMonth() + 1)).slice(-2) + '-' + ('0' + day.getDate()).slice(-2)
+      if (d.signDate !== key) {
+        n++
+      }
+      return n ? String(n) : ''
+    },
     tabs() {
       return [{
         key: 'backpack', name: '背包', icon: './icons/menu/quest_icon_02.png', badge: ''
+      }, {
+        key: 'camp', name: '章节', icon: './icons/menu/d1.png', badge: this.campBadge
+      }, {
+        key: 'daily', name: '每日', icon: './icons/menu/d2.png', badge: this.dailyBadge
       }, {
         key: 'shop', name: '商店', icon: './icons/menu/quest_icon_03.png', badge: ''
       }, {
@@ -724,6 +770,10 @@ export default {
       sfx.play('tab')
       if (key === 'hero') {
         this.$refs.hero.open()
+      } else if (key === 'camp') {
+        this.$refs.camp.open()
+      } else if (key === 'daily') {
+        this.$refs.daily.open()
       } else if (key === 'abyss') {
         this.openAbyss()
       } else if (key === 'achv') {
@@ -884,6 +934,8 @@ export default {
           perks: Object.assign({}, st.abyss.perks)
         },
         heroes: JSON.parse(JSON.stringify(st.heroes || {})),
+        campaign: JSON.parse(JSON.stringify(st.campaign || {})),
+        daily: JSON.parse(JSON.stringify(st.daily || {})),
         ultCharge: st.ultCharge || 0,
         t: Date.now()
       }
@@ -1045,6 +1097,12 @@ export default {
             if (ex.heroes) {
               this.$store.commit('set_heroes', ex.heroes)
             }
+            if (ex.campaign) {
+              this.$store.commit('set_campaign', ex.campaign)
+            }
+            if (ex.daily) {
+              this.$store.commit('set_daily', ex.daily)
+            }
             this.$store.commit('set_ult_charge', ex.ultCharge || 0)
             this.$store.commit('set_title', ex.title || '')
             if (ex.unlockedAchievements) {
@@ -1124,6 +1182,10 @@ export default {
           this.$store.commit('set_player_armor', this.$deepCopy(this.playerArmor))
           this.$store.commit('set_player_neck', this.$deepCopy(this.playerNeck))
         }
+
+        // 新增：每日任务/签到必须等整份存档（统计值、等级）就位后再按日期滚动，
+        // 否则「当日增量」的基准会取到恢复前的 0，读档就直接白拿奖励
+        this.$store.commit('daily_rollover')
 
         this.$store.commit("set_sys_info", {
           msg: `
@@ -1283,6 +1345,8 @@ export default {
       // 新增：一并关闭深渊 / 成就面板
       this.$refs.abyss && (this.$refs.abyss.visible = false)
       this.$refs.achv && (this.$refs.achv.visible = false)
+      this.$refs.camp && (this.$refs.camp.visible = false)
+      this.$refs.daily && (this.$refs.daily.visible = false)
       this.saveDateString = ''
 
       let equimentPanel = this.findComponentDownward(

@@ -18,6 +18,14 @@ import {
   partyBonusOf,
   normalizeHeroes
 } from './assets/js/heroes'
+import {
+  dayKey,
+  rollQuests
+} from './assets/config/daily'
+import {
+  STAMINA,
+  staminaNow
+} from './assets/config/campaign'
 Vue.use(Vuex)
 
 /** 加成池：装备百分比、套装、称号、深渊祭坛都汇入这里 */
@@ -49,6 +57,26 @@ export const initial_heroes = {
   dupes: 0
 }
 
+/** 章节关卡（主线推进 / 星级 / 扫荡 / 体力） */
+export const initial_campaign = {
+  stars: {}, // '章-关' -> 0..3
+  first: {}, // '章-关' -> 1（已首通）
+  clears: 0,
+  sweeps: 0,
+  best: 0, // 已通过的最大关卡序号（章*10+关）
+  stamina: STAMINA.max,
+  staminaAt: 0
+}
+
+/** 每日任务 + 签到 */
+export const initial_daily = {
+  date: '',
+  quests: [],
+  signDate: '',
+  signIndex: -1,
+  signStreak: 0
+}
+
 export const initial_abyss = {
   echoes: 0,
   totalEchoes: 0,
@@ -74,6 +102,11 @@ export const initial_stats = {
   offlineCount: 0,
   abyssFloors: 0,
   summons: 0,
+  enchantOk: 0,
+  sweeps: 0,
+  campaignClears: 0,
+  stageStars: 0,
+  signDays: 0,
   heroLevels: 0,
   starUps: 0,
   ults: 0,
@@ -205,6 +238,8 @@ export default new Vuex.Store({
     unlockedAchievements: {}, //已解锁成就
     abyss: JSON.parse(JSON.stringify(initial_abyss)), //深渊回廊
     heroes: JSON.parse(JSON.stringify(initial_heroes)), //英雄系统
+    campaign: JSON.parse(JSON.stringify(initial_campaign)), //章节关卡
+    daily: JSON.parse(JSON.stringify(initial_daily)), //每日任务 + 签到
     heroBonus: partyBonusOf(initial_heroes), //队伍折算后的聚合加成（UI/战斗读取）
     ultCharge: 0, //大招充能（每场胜利 +1）
     stats: JSON.parse(JSON.stringify(initial_stats)), //统计数据
@@ -316,6 +351,89 @@ export default new Vuex.Store({
     },
     set_ult_charge(state, data) {
       state.ultCharge = Math.max(0, parseInt(data) || 0)
+    },
+    set_campaign(state, data) {
+      state.campaign = Object.assign({}, state.campaign, data || {})
+    },
+    /* 体力：读时按时间戳补算，写时刷新锚点（离线回复因此天然生效，不需要全局计时器） */
+    spend_stamina(state, n) {
+      const cur = staminaNow(state.campaign)
+      state.campaign = Object.assign({}, state.campaign, {
+        stamina: Math.max(0, cur.value - Math.max(0, Number(n) || 0)),
+        staminaAt: Date.now()
+      })
+    },
+    /* 统一奖励入口：金币 / 回响 / 英雄碎片 / 招募令，两个新面板共用 */
+    grant_reward(state, data) {
+      const r = data || {}
+      if (r.gold) {
+        this.commit('set_player_gold', Math.floor(r.gold))
+        this.commit('report', {
+          key: 'goldEarned',
+          num: Math.floor(r.gold),
+          check: false
+        })
+      }
+      if (r.echoes) {
+        this.commit('add_echoes', Math.floor(r.echoes))
+      }
+      if (r.tickets || r.shards) {
+        const h = normalizeHeroes(state.heroes)
+        if (r.tickets) {
+          h.tickets = (h.tickets || 0) + Math.floor(r.tickets)
+        }
+        if (r.shards) {
+          const ids = Object.keys(h.owned)
+          const n = Math.floor(r.shards)
+          if (ids.length) {
+            const id = ids[Math.floor(Math.random() * ids.length)]
+            h.owned[id].shards = (h.owned[id].shards || 0) + n
+          } else {
+            h.pendingShards = (h.pendingShards || 0) + n
+          }
+        }
+        state.heroes = h
+      }
+      if (r.msg) {
+        this.commit('set_sys_info', {
+          msg: r.msg,
+          type: r.type || 'win'
+        })
+      }
+    },
+    set_daily(state, data) {
+      // 只负责整块覆盖，日期滚动交给调用方（loadGame 在存档全部就位后再 commit daily_rollover）
+      state.daily = Object.assign({}, state.daily, data || {})
+    },
+    daily_rollover(state, ts) {
+      const key = dayKey(ts || Date.now())
+      if (state.daily.date === key) {
+        return
+      }
+      const quests = rollQuests(key, state.playerAttribute.lv || 1)
+      // 以当前统计值为基准，进度算「当日增量」
+      quests.forEach(q => {
+        q.base = Number(state.stats[q.key] || 0)
+      })
+      state.daily = Object.assign({}, state.daily, {
+        date: key,
+        quests: quests
+      })
+    },
+    daily_claim(state, id) {
+      state.daily = Object.assign({}, state.daily, {
+        quests: (state.daily.quests || []).map(q => q.id === id ? Object.assign({}, q, {
+          claimed: true
+        }) : q)
+      })
+    },
+    daily_sign(state, data) {
+      const d = data || {}
+      state.daily = Object.assign({}, state.daily, {
+        signDate: d.date || dayKey(),
+        signIndex: Number(d.index) || 0,
+        signStreak: Number(d.streak) || 1
+      })
     },
     set_player_attribute(state, data) {
       var p = state.playerAttribute
@@ -637,7 +755,9 @@ export default new Vuex.Store({
         reincarnation: state.reincarnation,
         abyss: state.abyss,
         setDetail: state.setDetail,
-        heroes: state.heroes
+        heroes: state.heroes,
+        campaign: state.campaign,
+        daily: state.daily
       }
       const newly = []
       ACHIEVEMENTS.forEach(item => {

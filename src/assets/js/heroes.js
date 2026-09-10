@@ -30,7 +30,9 @@ export function newHeroState() {
     pity5: 0,
     pity4: 0,
     tickets: 0,
-    dupes: 0
+    dupes: 0,
+    // 还没拥有英雄时领到的碎片先进这里，抽到新英雄后自动补发
+    pendingShards: 0
   }
 }
 
@@ -133,6 +135,20 @@ export function rollSummon(heroes, count, gold, rng = Math.random) {
       })
     }
     next.owned[id].pulls++
+  }
+  // 「无主碎片」补发：新英雄到手后一次性给他
+  if (next.pendingShards > 0) {
+    const fresh = results.filter(x => x.isNew)
+    if (fresh.length) {
+      next.owned[fresh[0].id].shards += next.pendingShards
+      results.forEach(x => {
+        if (x.id === fresh[0].id) {
+          x.shards += next.pendingShards
+          x.bonus = next.pendingShards
+        }
+      })
+      next.pendingShards = 0
+    }
   }
   return {
     ok: results.length > 0,

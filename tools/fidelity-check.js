@@ -457,6 +457,68 @@ console.log('\n[5] 新增玩法（英雄 / 套装 / 祭坛）与原版属性的�
   check('上阵 3 名英雄后面板确实提升（证明接进了属性管线）', gainOk, detail)
 }
 
+// ---------------------------------------------------------------- [6] 章节远征 / 每日：数值锚点
+console.log('\n[6] 新玩法（章节远征 / 每日）的数值是否仍锚定在原版管线上')
+{
+  const camp = (() => { try { return require(path.join(ROOT, 'src/assets/config/campaign.js')) } catch (e) { return null } })()
+  const daily = (() => { try { return require(path.join(ROOT, 'src/assets/config/daily.js')) } catch (e) { return null } })()
+  if (!camp || !daily) {
+    check('章节 / 每日配置可加载', false, '缺少 campaign.js 或 daily.js')
+  } else {
+    // 第 1 章第 1 关的怪 = 原版 lv5「普通」怪的中位数（543/73），取自未改动的 handle.js 数值表
+    const m1 = camp.stageMonster(1, 1).attribute
+    check('章节怪物数值 = 原版副本怪中位数（1-1 关）',
+      m1.HP === 543 && m1.ATK === 73, `HP ${m1.HP}/543，ATK ${m1.ATK}/73`)
+
+    const starsOk = camp.starsFor(true, 1) === 3 && camp.starsFor(true, 0.8) === 3 &&
+      camp.starsFor(true, 0.7999) === 2 && camp.starsFor(true, 0.45) === 2 &&
+      camp.starsFor(true, 0.4499) === 1 && camp.starsFor(false, 1) === 0
+    check('星级门槛 0.80 / 0.45 未被改动', starsOk)
+
+    // 扫荡 = 3★ 收益的 60%，且不进入战斗（不改血量）
+    const a = camp.stageReward(3, 2, 3, false).gold
+    const b = camp.sweepReward(3, 2, 1).gold
+    check('扫荡金币 = 3★ 通关的 60%', b === Math.floor(a * camp.SWEEP.goldK), `${a} → ${b}`)
+    check('扫荡需 3★ 且体力比手打便宜', camp.SWEEP.requireStars === 3 && camp.SWEEP.cost < camp.STAMINA.cost,
+      `sweep ${camp.SWEEP.cost} / challenge ${camp.STAMINA.cost}`)
+
+    // 离线回体力：按时间戳补算，不靠计时器
+    const t0 = Date.now()
+    const off = camp.staminaNow({ stamina: 5, staminaAt: t0 - 3600 * 1000 }, t0)
+    check('离线 1 小时回复 24 点体力（时间戳懒算）', off.value === Math.min(camp.STAMINA.max, 5 + 24), `${off.value}`)
+
+    // 每日：同一天的任务表固定，进度只算「当日增量」
+    const q1 = daily.rollQuests('2026-01-01', 30)
+    const q2 = daily.rollQuests('2026-01-01', 30)
+    const same = JSON.stringify(q1.map(x => [x.id, x.goal])) === JSON.stringify(q2.map(x => [x.id, x.goal]))
+    check('每日任务表按日期固定（同一天两次抽取一致）', same && q1.length === 4, `${q1.length} 条`)
+    const qd = daily.rollQuests('2026-01-02', 30)
+    check('换一天就是另一批任务', JSON.stringify(q1.map(x => x.id)) !== JSON.stringify(qd.map(x => x.id)))
+
+    const p0 = daily.questProgress({ key: 'kills', base: 90, goal: 50 }, { kills: 100 })
+    const p1 = daily.questProgress({ key: 'kills', base: 120, goal: 50 }, { kills: 100 })
+    check('任务进度只读当日增量（不受历史累计影响）', p0 === 10 && p1 <= 0, `${p0} / ${p1}`)
+    const r20 = daily.questReward(Object.assign({}, q1[0], { goal: q1[0].goal }), 20).gold
+    const r40 = daily.questReward(Object.assign({}, q1[0], { goal: q1[0].goal }), 40).gold
+    check('每日任务奖励随等级线性放大', r40 >= r20 && r20 > 0, `lv20 ${r20} → lv40 ${r40}`)
+
+    // 签到：断签回到第 1 天，连签往后推
+    const keyAt = off => daily.dayKey(Date.now() + off * 86400000)
+    const p_con = daily.signPlan({ signDate: keyAt(-1), signIndex: 1, signStreak: 2 }, Date.now())
+    const p_gap = daily.signPlan({ signDate: '2020-01-01', signIndex: 4, signStreak: 5 }, Date.now())
+    check('签到：连签推进 7 天周期，断签归位第 1 天',
+      p_con.can && p_con.index === 2 && p_con.streak === 3 && p_gap.can && p_gap.index === 0 && p_gap.streak === 1,
+      `连签 idx ${p_con.index}/streak ${p_con.streak}，断签 idx ${p_gap.index}`)
+    const p_done = daily.signPlan({ signDate: daily.dayKey(Date.now()), signIndex: 0, signStreak: 1 }, Date.now())
+    check('签到：同一天不能重复领', !p_done.can)
+    const lowIds = daily.rollQuests('2026-03-03', 1).map(x => x.id)
+    const gated = lowIds.every(id => ((daily.QUEST_POOL.find(q => q.id === id) || {}).need || 1) <= 1)
+    check('低等级不会派发做不完的每日任务', gated && lowIds.length === 4, lowIds.join(','))
+    const txt = daily.questText({ des: '今日入账 {goal} 金币' }, 240000)
+    check('任务文案跟随实际目标（大数字折算成万）', txt === '今日入账 24万 金币', txt)
+  }
+}
+
 // ---------------------------------------------------------------- 汇总
 const failed = results.filter(r => !r.pass)
 console.log(`\n==== ${results.length - failed.length}/${results.length} 通过 ====`)

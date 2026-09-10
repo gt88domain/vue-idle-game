@@ -247,6 +247,11 @@ export default {
           num: lv,
           check: false
         });
+        // 新增：强化成功次数（每日任务 / 成就）
+        this.$store.commit('report', {
+          key: 'enchantOk',
+          num: 1
+        });
       } else {
         // 强化失败
         if (lv >= 5) {
